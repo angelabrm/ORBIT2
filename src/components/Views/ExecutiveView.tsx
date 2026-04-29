@@ -34,8 +34,8 @@ const ExecutiveView: React.FC = () => {
   };
 
   const clientData = [
-    { name: 'Stellantis', CAC: nudge(400), Fleet: nudge(300), Premium: nudge(200), Warranty: nudge(500), PDC: nudge(100) },
-    { name: 'Pepsico', PMO: nudge(800) },
+    { name: 'Stellantis', CAC: nudge(400), Fleet: nudge(300), Premium: nudge(200) },
+    { name: 'Pepsico', CAC: nudge(800) },
   ];
 
   const revenueTrend = [
@@ -73,7 +73,7 @@ const ExecutiveView: React.FC = () => {
               <Zap size={20} />
             </Box>
             <Box>
-              <Typography variant="h5" color="secondary.main">6</Typography>
+              <Typography variant="h5" color="secondary.main">3</Typography>
               <Typography variant="caption" sx={{ opacity: 0.6, fontSize: 10 }}>SERVICE DESKS</Typography>
             </Box>
           </Paper>
@@ -127,7 +127,6 @@ const ExecutiveView: React.FC = () => {
                 <Bar dataKey="CAC" fill={theme.palette.primary.main} stackId="a" barSize={12} radius={[0, 2, 2, 0]} />
                 <Bar dataKey="Fleet" fill={`${theme.palette.primary.main}44`} stackId="a" />
                 <Bar dataKey="Premium" fill={theme.palette.secondary.main} stackId="a" />
-                <Bar dataKey="Warranty" fill={`${theme.palette.secondary.main}44`} stackId="a" />
               </BarChart>
             </ResponsiveContainer>
           </Paper>

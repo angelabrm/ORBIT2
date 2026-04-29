@@ -4,7 +4,7 @@ import { User, MOCK_USERS } from '../data/mockData';
 
 import dayjs, { Dayjs } from 'dayjs';
 
-export type ManagementTab = "Operational" | "Administrative";
+export type ManagementTab = "Operational" | "Administrative" | "Financial";
 
 interface AuthContextType {
   user: User | null;

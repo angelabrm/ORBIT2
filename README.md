@@ -1,20 +1,35 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Dashboard Application
 
-# Run and deploy your AI Studio app
+This project is a high-performance dashboard built with React 19, Vite 6, and Tailwind CSS 4.
 
-This contains everything you need to run your app locally.
+## Deployment on Vercel
 
-View your app in AI Studio: https://ai.studio/apps/d2feb23e-b3e0-4d0d-a36d-a3a1e2e3dd83
+To deploy this project on Vercel, follow these steps:
 
-## Run Locally
+1.  **Push to GitHub/GitLab/Bitbucket**: Ensure your latest changes are committed and pushed to a repository.
+2.  **Import to Vercel**:
+    - Go to [vercel.com/new](https://vercel.com/new).
+    - Connect your git provider and select this repository.
+3.  **Configure Environment Variables**:
+    - During the import process, add any required environment variables:
+        - `GEMINI_API_KEY`: Your Google Gemini API key.
+4.  **Build Settings**:
+    - Vercel should automatically detect **Vite** as the framework.
+    - **Build Command**: `npm run build`
+    - **Output Directory**: `dist`
+5.  **Deploy**: Click "Deploy".
 
-**Prerequisites:**  Node.js
+## Local Development
 
+```bash
+npm install
+npm run dev
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Features
+
+- **Inline Member Dashboard**: View individual team member details without leaving the page.
+- **Role-based Views**: Different perspectives for Leaders, Managers, and Agents.
+- **Advanced KPIs**: Average performance, productivity, and adherence tracking.
+- **Trend Charts**: Interactive line charts with metric switching.
+- **Administrative View**: Track home office rates, attendance, and adherence with calendar integration.

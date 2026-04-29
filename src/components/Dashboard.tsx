@@ -5,9 +5,8 @@ import { ArrowLeft } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import AgentView from './Views/AgentView';
-import LeaderView from './Views/LeaderView';
 import ProjectManagerView from './Views/ProjectManagerView';
-import ExecutiveView from './Views/ExecutiveView';
+import FinancialView from './Views/FinancialView';
 import { useAuth } from '../context/AuthContext';
 import { Role } from '../data/mockData';
 
@@ -18,19 +17,25 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
   const theme = useTheme();
-  const { user, selectedMember, setSelectedMember } = useAuth();
+  const { user, selectedMember, setSelectedMember, managementTab } = useAuth();
 
-  const renderView = (role: Role, isMemberView: boolean = false) => {
+  const renderView = (role: Role, member?: any) => {
+    // Main dashboard view by role
     switch (role) {
-      case 'Agent':
-      case 'Staff':
-      case 'Leader':
       case 'Manager':
-      case 'Project Manager':
       case 'Executive':
-        return <AgentView member={isMemberView ? selectedMember : null} />;
+        if (managementTab === 'Administrative') {
+          return <AgentView member={member} />;
+        }
+        if (managementTab === 'Financial') {
+          return <FinancialView />;
+        }
+        return <ProjectManagerView member={member} />;
+      case 'Leader':
+        return <AgentView member={member} />;
+      case 'Staff':
       default:
-        return <AgentView />;
+        return <AgentView member={member} />;
     }
   };
 
@@ -68,7 +73,7 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
                 </IconButton>
                 <Box>
                   <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main', textTransform: 'uppercase', letterSpacing: 1 }}>
-                    You're seeing {selectedMember.name} Dashboard
+                    You're seeing {selectedMember.role === 'Leader' ? `Leader ${selectedMember.serviceDesk}` : selectedMember.name} Dashboard
                   </Typography>
                   <Typography variant="caption" sx={{ opacity: 0.6 }}>
                     Direct Support: {selectedMember.rfc} | {selectedMember.serviceDesk}
@@ -76,7 +81,7 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
                 </Box>
               </Box>
               
-              {renderView(selectedMember.role, true)}
+              {renderView(selectedMember.role, selectedMember)}
             </Box>
           ) : (
             user && renderView(user.role)

@@ -45,10 +45,12 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
   const { user, logout, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
 
   const isLeader = user?.role === 'Leader';
+  const isManager = user?.role === 'Manager' || user?.role === 'Executive';
+  const canSeeAgentDropdown = isLeader || isManager;
   const { managementTab, setManagementTab } = useAuth();
 
   const showManagementTabs = user && (
-    ["Leader", "Manager", "Executive", "Project Manager"].includes(user.role) || 
+    ["Leader", "Manager", "Executive"].includes(user.role) || 
     user.serviceDesk === 'CAC' || 
     user.serviceDesk === 'Fleet' || 
     user.serviceDesk === 'Premium'
@@ -192,9 +194,11 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
           </Typography>
           <Box sx={{ 
             display: 'flex', 
+            flexDirection: user?.role === 'Executive' ? 'column' : 'row',
             bgcolor: 'rgba(255,255,255,0.05)', 
             borderRadius: 1, 
             p: 0.5,
+            gap: 0.5,
             border: '1px solid rgba(255,255,255,0.1)' 
           }}>
             <Box 
@@ -231,11 +235,30 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
             >
               Administrative
             </Box>
+            {user?.role === 'Executive' && (
+              <Box 
+                onClick={() => setManagementTab('Financial')}
+                sx={{ 
+                  flex: 1, 
+                  textAlign: 'center', 
+                  py: 0.8, 
+                  fontSize: 11, 
+                  fontWeight: 700, 
+                  cursor: 'pointer',
+                  borderRadius: 0.5,
+                  bgcolor: managementTab === 'Financial' ? 'primary.main' : 'transparent',
+                  color: managementTab === 'Financial' ? 'white' : 'rgba(255,255,255,0.6)',
+                  transition: 'all 0.3s ease'
+                }}
+              >
+                Financial
+              </Box>
+            )}
           </Box>
         </Box>
       )}
 
-      {isLeader && (
+      {canSeeAgentDropdown && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Typography 
             variant="caption" 
@@ -247,7 +270,7 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
               fontWeight: 700 
             }}
           >
-            Team Member
+            {isManager ? 'All Team Members' : 'Team Member'}
           </Typography>
           <FormControl fullWidth size="small">
             <Select
@@ -264,15 +287,43 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
                 color: '#fff',
                 fontSize: 13,
                 height: 40,
-                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                '& .MuiSelect-select': { py: 1 }
               }}
             >
               <MenuItem value=""><em>View All</em></MenuItem>
-              {user.team?.map((rfc) => (
+              
+              {isLeader && user?.team?.map((rfc) => (
                 <MenuItem key={rfc} value={rfc}>
                   {MOCK_USERS[rfc]?.name || rfc}
                 </MenuItem>
               ))}
+
+              {isManager && ["CAC", "Fleet", "Premium"].map((dept) => {
+                const deptAgents = Object.values(MOCK_USERS).filter(u => u.role === 'Agent' && u.serviceDesk === dept);
+                if (deptAgents.length === 0) return null;
+                
+                return [
+                  <MenuItem key={`header-${dept}`} disabled sx={{ 
+                    opacity: '1 !important', 
+                    fontWeight: 800, 
+                    color: 'primary.main', 
+                    fontSize: 10, 
+                    bgcolor: 'rgba(11, 160, 175, 0.1)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 1,
+                    minHeight: 'auto',
+                    py: 1
+                  }}>
+                    {dept}
+                  </MenuItem>,
+                  ...deptAgents.map(agent => (
+                    <MenuItem key={agent.rfc} value={agent.rfc} sx={{ pl: 3 }}>
+                      {agent.name}
+                    </MenuItem>
+                  ))
+                ];
+              })}
             </Select>
           </FormControl>
         </Box>

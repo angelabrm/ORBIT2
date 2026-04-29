@@ -20,15 +20,16 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData, MOCK_USERS } from '../../data/mockData';
+import { fetchOpenedCases } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
 
 dayjs.extend(isBetween);
 
-const formatValue = (val: any) => {
+const formatValue = (val: any, isInteger: boolean = false) => {
   if (typeof val !== 'number') return val;
-  return Number(val.toFixed(1));
+  return isInteger ? Math.round(val) : Number(val.toFixed(1));
 };
 
 interface IndicatorProps {
@@ -41,11 +42,14 @@ interface IndicatorProps {
   onClick?: () => void;
   isSelected?: boolean;
   largeFonts?: boolean;
+  quartile?: string;
 }
 
-const ManagementIndicator: React.FC<IndicatorProps> = ({ title, value, icon, formula, color = 'primary.main', description, onClick, isSelected, largeFonts }) => {
+const ManagementIndicator: React.FC<IndicatorProps> = ({ title, value, icon, formula, color = 'primary.main', description, onClick, isSelected, largeFonts, quartile }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+
+  const qColor = quartile === 'Q1' ? '#b9e04d' : quartile === 'Q2' ? '#ffcc00' : quartile === 'Q3' ? '#ff9900' : '#ea5713';
 
   return (
     <Paper 
@@ -68,7 +72,24 @@ const ManagementIndicator: React.FC<IndicatorProps> = ({ title, value, icon, for
         '&:hover': onClick ? { transform: 'translateY(-1px)', bgcolor: isDark ? 'rgba(11, 160, 175, 0.1)' : 'rgba(11, 160, 175, 0.05)' } : {}
       }}
     >
-      <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+      {quartile && (
+        <Box sx={{ 
+          position: 'absolute', 
+          top: 0, 
+          left: 0, 
+          right: 0, 
+          bgcolor: qColor, 
+          py: 0.5, 
+          textAlign: 'center',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          zIndex: 2
+        }}>
+          <Typography variant="caption" sx={{ color: '#000', fontWeight: 900, fontSize: 10, letterSpacing: 0.5 }}>
+            YOU ARE POSITIONED IN PERFORMANCE QUARTILE {quartile}
+          </Typography>
+        </Box>
+      )}
+      <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, mt: quartile ? 2 : 0 }}>
         <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: `${color}1A`, color: color, display: 'flex' }}>
           {icon}
         </Box>
@@ -457,7 +478,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const isDark = theme.palette.mode === 'dark';
   
   const currentUser = member || user;
-  const isManagement = currentUser ? ["Leader", "Manager", "Executive", "Project Manager"].includes(currentUser.role) : false;
+  const isManagement = currentUser ? ["Leader", "Manager", "Executive"].includes(currentUser.role) : false;
   const isStandardAgent = currentUser ? ["CAC", "Fleet", "Premium"].includes(currentUser.serviceDesk) : false;
   
   // State for Trend Chart selections
@@ -466,7 +487,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const [hierarchyAnchor, setHierarchyAnchor] = React.useState<null | HTMLElement>(null);
   const [activeAdminTab, setActiveAdminTab] = React.useState<'homeOffice' | 'attendance' | 'adherence' | null>(null);
   const [selectedTeamMember, setSelectedTeamMember] = React.useState<string | null>(null);
-  const [adminViewType, setAdminViewType] = React.useState<'personal' | 'team'>('personal');
+  const [adminViewType, setAdminViewType] = React.useState<'personal' | 'team'>(
+    currentUser?.role === 'Executive' ? 'team' : 'personal'
+  );
+  const [dbOpenedCases, setDbOpenedCases] = React.useState<number | null>(null);
 
   const handleHierarchyClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     setHierarchyAnchor(event.currentTarget);
@@ -477,10 +501,97 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     setHierarchyAnchor(null);
   };
 
+  React.useEffect(() => {
+    const loadDbData = async () => {
+      if (!currentUser) return;
+      
+      let rfcsToFetch: string[] = [];
+      if (currentUser.role === "Agent") {
+        rfcsToFetch = [currentUser.rfc];
+      } else if (currentUser.role === "Leader") {
+        // Sum of all Agents in their department
+        rfcsToFetch = Object.values(MOCK_USERS)
+          .filter(u => u.role === "Agent" && u.serviceDesk === currentUser.serviceDesk)
+          .map(u => u.rfc);
+      } else if (currentUser.role === "Manager" || currentUser.role === "Executive") {
+        // Sum of all Agents and Leaders in the complete team
+        rfcsToFetch = Object.values(MOCK_USERS)
+          .filter(u => u.role === "Agent" || u.role === "Leader")
+          .map(u => u.rfc);
+      }
+
+      if (rfcsToFetch.length > 0) {
+        const cases = await fetchOpenedCases(undefined, startDate, endDate);
+        const filteredCases = cases.filter(c => rfcsToFetch.includes(c.case_owner));
+        setDbOpenedCases(filteredCases.length);
+      } else {
+        setDbOpenedCases(null);
+      }
+    };
+    loadDbData();
+  }, [currentUser, startDate, endDate]);
+
   const stats = React.useMemo(() => {
     if (!currentUser) return null;
-    return getFilteredMetrics(currentUser.rfc, startDate, endDate) as UserMetrics;
-  }, [currentUser, startDate, endDate]);
+    
+    let baseStats: UserMetrics;
+    
+    if (currentUser.role === 'Leader' || currentUser.role === 'Manager' || currentUser.role === 'Executive') {
+      let rfcsToAggregate: string[] = [];
+      if (currentUser.role === 'Leader') {
+        rfcsToAggregate = Object.values(MOCK_USERS)
+          .filter(u => u.role === "Agent" && u.serviceDesk === currentUser.serviceDesk)
+          .map(u => u.rfc);
+      } else {
+        rfcsToAggregate = Object.values(MOCK_USERS)
+          .filter(u => u.role === "Agent" || u.role === "Leader")
+          .map(u => u.rfc);
+      }
+      
+      if (rfcsToAggregate.length > 0) {
+        baseStats = { ...(getFilteredMetrics(rfcsToAggregate[0], startDate, endDate) as UserMetrics) };
+        // Reset numeric fields
+        (Object.keys(baseStats) as Array<keyof UserMetrics>).forEach(key => {
+          if (typeof baseStats[key] === 'number') (baseStats as any)[key] = 0;
+        });
+
+        rfcsToAggregate.forEach(rfc => {
+          const s = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
+          baseStats.closedCases += s.closedCases;
+          baseStats.qa += s.qa;
+          baseStats.nsatInfo += s.nsatInfo;
+          baseStats.nsatClaims += s.nsatClaims;
+          baseStats.slaCompliance += s.slaCompliance;
+          baseStats.callsPerHour += s.callsPerHour;
+          baseStats.closedCasesPerHour += s.closedCasesPerHour;
+          baseStats.fcr += s.fcr;
+          baseStats.teamBacklog += s.teamBacklog;
+          baseStats.incomingCalls += s.incomingCalls;
+          baseStats.outgoingCalls += s.outgoingCalls;
+          baseStats.adherence += s.adherence;
+        });
+
+        // Averages for percentage/rate fields
+        baseStats.qa /= rfcsToAggregate.length;
+        baseStats.nsatInfo /= rfcsToAggregate.length;
+        baseStats.nsatClaims /= rfcsToAggregate.length;
+        baseStats.slaCompliance /= rfcsToAggregate.length;
+        baseStats.callsPerHour /= rfcsToAggregate.length;
+        baseStats.closedCasesPerHour /= rfcsToAggregate.length;
+        baseStats.fcr /= rfcsToAggregate.length;
+        baseStats.adherence /= rfcsToAggregate.length;
+      } else {
+        baseStats = { ...(getFilteredMetrics(currentUser.rfc, startDate, endDate) as UserMetrics) };
+      }
+    } else {
+      baseStats = { ...(getFilteredMetrics(currentUser.rfc, startDate, endDate) as UserMetrics) };
+    }
+
+    if (dbOpenedCases !== null) {
+      baseStats.openedCases = dbOpenedCases;
+    }
+    return baseStats;
+  }, [currentUser, startDate, endDate, dbOpenedCases]);
 
   // Derived calculations for standard agent (move to top level hooks)
   const calcResults = React.useMemo(() => {
@@ -488,7 +599,12 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const closedPerHourScore = (stats.closedCasesPerHour / 1) * 100;
     const callsPerHourScore = (stats.callsPerHour / 6) * 100;
     const fcrScore = stats.fcr;
-    const closedRateScore = stats.closedCasesRate;
+    
+    // Use DB opened cases if available for the rate calculation
+    const openedCases = stats.openedCases || 1; // Prevent division by zero
+    const closedCasesRate = (stats.closedCases / openedCases) * 100;
+    const closedRateScore = Math.min(100, closedCasesRate);
+    
     const productivity = (closedPerHourScore * 0.25) + (callsPerHourScore * 0.25) + (fcrScore * 0.25) + (closedRateScore * 0.25);
     const performance = (stats.qa * 0.25) + (stats.nsatInfo * 0.125) + (stats.nsatClaims * 0.125) + (productivity * 0.25) + (stats.slaCompliance * 0.25);
     const empathyLevel = 100 - (stats.empathyPenalty || 0);
@@ -499,6 +615,39 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   }, [stats]);
 
   const { productivity, performance, bonus, rankingPercentile } = calcResults;
+
+  const myPerformanceQuartile = React.useMemo(() => {
+    if (!currentUser || currentUser.role !== 'Agent') return null;
+    
+    // Find my leader's team to ensure consistency with Leader's view
+    const myLeader = Object.values(MOCK_USERS).find(u => u.role === 'Leader' && u.serviceDesk === currentUser.serviceDesk);
+    if (!myLeader || !myLeader.team) return null;
+    
+    // Calculate performance for each team member
+    const teamMetrics = myLeader.team.map(rfc => {
+      const s = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
+      const closedPerHourScore = (s.closedCasesPerHour / 1) * 100;
+      const callsPerHourScore = (s.callsPerHour / 6) * 100;
+      const fcrScore = s.fcr;
+      const closedRateScore = s.closedCasesRate;
+      const prod = (closedPerHourScore * 0.25) + (callsPerHourScore * 0.25) + (fcrScore * 0.25) + (closedRateScore * 0.25);
+      const perf = (s.qa * 0.25) + (s.nsatInfo * 0.125) + (s.nsatClaims * 0.125) + (prod * 0.25) + (s.slaCompliance * 0.25);
+      return { rfc, performance: perf };
+    });
+    
+    // Sort by performance descending (highest first) as in Leader view
+    const sortedMembers = [...teamMetrics].sort((a, b) => b.performance - a.performance);
+    
+    // Find my index
+    const myIndex = sortedMembers.findIndex(p => p.rfc === currentUser.rfc);
+    if (myIndex === -1) return null;
+    
+    const percentile = (myIndex / sortedMembers.length) * 100;
+    if (percentile >= 75) return 'Q4';
+    if (percentile >= 50) return 'Q3';
+    if (percentile >= 25) return 'Q2';
+    return 'Q1';
+  }, [currentUser, startDate, endDate]);
 
   // Historical data for this user
   const rawHistoricalData = React.useMemo(() => currentUser ? generateHistoricalData(currentUser.rfc) : [], [currentUser]);
@@ -533,7 +682,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       
       selectedIndicators.forEach(indicator => {
         const sum = items.reduce((acc, item) => acc + (item[indicator] || 0), 0);
-        entry[indicator] = Number((sum / items.length).toFixed(1));
+        const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(indicator);
+        entry[indicator] = isInt ? Math.round(sum / items.length) : Number((sum / items.length).toFixed(1));
       });
       
       return entry;
@@ -664,7 +814,15 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   };
 
   // Team calculations for Management
-  const teamRfcs = currentUser?.team || [];
+  const teamRfcs = React.useMemo(() => {
+    if (currentUser?.role === 'Manager' || currentUser?.role === 'Executive') {
+      return Object.values(MOCK_USERS)
+        .filter(u => u.role === 'Agent' || u.role === 'Leader')
+        .map(u => u.rfc);
+    }
+    return currentUser?.team || [];
+  }, [currentUser]);
+
   const teamStats = React.useMemo(() => {
     if (!isManagement) return [];
     return teamRfcs.map(rfc => {
@@ -1041,7 +1199,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                             <Typography sx={{ fontSize: 13, fontWeight: selectedTeamMember === member.rfc ? 700 : 500 }}>{member.fullName}</Typography>
                           </Box>
                           <Typography sx={{ fontSize: 12, fontWeight: 900, fontFamily: '"JetBrains Mono", monospace', opacity: 0.8 }}>
-                            {formatValue(member.value)}{currentIndicator.includes('%') || ['Performance', 'Productivity', 'Bonus', 'Closed Cases Rate'].includes(currentIndicator) ? '%' : ''}
+                            {formatValue(member.value, ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(currentIndicator))}{currentIndicator.includes('%') || ['Performance', 'Productivity', 'Bonus', 'Closed Cases Rate'].includes(currentIndicator) ? '%' : ''}
                           </Typography>
                         </Box>
                       ))}
@@ -1094,6 +1252,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
               formula="Comparison of your Performance score against your entire team."
               color={getRankingColor(rankingPercentile)}
               description={`Congratulations! You are in the top ${rankingPercentile}% of the organization. This means you are performing better than ${100 - rankingPercentile}% of your peers.`}
+              quartile={myPerformanceQuartile || undefined}
             />
           </Grid>
           <Grid size={3}>
@@ -1241,7 +1400,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       }}
                       itemStyle={{ fontSize: 18, padding: '4px 0' }}
                       labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
-                      formatter={(val: any, name: string) => [formatValue(val), name]}
+                      formatter={(val: any, name: string) => [formatValue(val, ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name) || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si))), name]}
                       labelFormatter={(label, payload) => {
                         if (payload && payload[0]) {
                           const date = payload[0].payload.fullDate;
@@ -1314,7 +1473,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     }}
                     itemStyle={{ fontSize: 16 }}
                     labelStyle={{ fontSize: 16, marginBottom: 4, fontWeight: 700 }}
-                    formatter={formatValue}
+                    formatter={(val: any, name: string) => [formatValue(val, ['NSAT I', 'NSAT C'].includes(name)), name]}
                   />
                   <Bar dataKey="score" fill={theme.palette.primary.main} radius={[4, 4, 0, 0]} />
                 </BarChart>
@@ -1346,7 +1505,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     }}
                     itemStyle={{ fontSize: 16 }}
                     labelStyle={{ fontSize: 16, marginBottom: 4, fontWeight: 700 }}
-                    formatter={formatValue}
+                    formatter={(val: any, name: string) => [formatValue(val, ['Cases', 'Calls'].includes(name)), name]}
                   />
                   <Bar dataKey="val" fill={theme.palette.secondary.main} radius={[4, 4, 0, 0]} />
                 </BarChart>
@@ -1410,14 +1569,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           
           {isManagement && (
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button 
-                variant={adminViewType === 'personal' ? 'contained' : 'outlined'} 
-                size="small" 
-                onClick={() => setAdminViewType('personal')}
-                sx={{ borderRadius: 2 }}
-              >
-                My Data
-              </Button>
+              {currentUser?.role !== 'Executive' && (
+                <Button 
+                  variant={adminViewType === 'personal' ? 'contained' : 'outlined'} 
+                  size="small" 
+                  onClick={() => setAdminViewType('personal')}
+                  sx={{ borderRadius: 2 }}
+                >
+                  My Data
+                </Button>
+              )}
               <Button 
                 variant={adminViewType === 'team' ? 'contained' : 'outlined'} 
                 size="small" 
@@ -1684,7 +1845,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         {/* Row 1: Primary KPIs */}
         <Grid size={3}><MetricCard title="Global QA" value={`${formatValue(stats.qa)}%`} icon={<Award size={24} />} color="secondary.main" /></Grid>
         <Grid size={3}><MetricCard title="Closed Rate" value={`${formatValue((stats.closedCases/stats.openedCases)*100)}%`} icon={<TrendingUp size={24} />} color="primary.main" /></Grid>
-        <Grid size={3}><MetricCard title="NSAT Info" value={formatValue(stats.nsatInfo)} icon={<Smile size={24} />} color="primary.main" /></Grid>
+        <Grid size={3}><MetricCard title="NSAT Info" value={formatValue(stats.nsatInfo, true)} icon={<Smile size={24} />} color="primary.main" /></Grid>
         <Grid size={3}><MetricCard title="Adherence" value={`${formatValue(stats.adherence)}%`} icon={<AlertCircle size={24} />} color="secondary.main" /></Grid>
 
         {/* Row 2: Main Data Grid + Side Stats */}
@@ -1713,7 +1874,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                   }}
                   itemStyle={{ fontSize: 16 }}
                   labelStyle={{ fontSize: 16, marginBottom: 4, fontWeight: 700 }}
-                  formatter={formatValue}
+                  formatter={(val: any, name: string) => [formatValue(val, ['Opened', 'Closed'].includes(name)), name]}
                 />
                 <Bar dataKey="val" fill={theme.palette.primary.main} radius={[4, 4, 0, 0]} barSize={50} />
               </BarChart>
