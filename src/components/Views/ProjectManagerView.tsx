@@ -60,134 +60,83 @@ const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
     loadData();
   }, [startDate, endDate]);
 
-  const getAggregatedMetrics = (memberRfc: string) => {
-    const targetUser = MOCK_USERS[memberRfc];
-    const isManagerAggregation = targetUser?.role === 'Manager' || targetUser?.role === 'Executive';
-    
-    let s: UserMetrics;
-    
-    if (isManagerAggregation) {
-      // Sum everything for the manager's view
-      const relevantRfcs = Object.values(MOCK_USERS)
-        .filter(u => u.role === "Agent" || u.role === "Leader")
-        .map(u => u.rfc);
-        
-      // Initialize with zeros or use first user's structure
-      s = { ...(getFilteredMetrics(relevantRfcs[0], startDate, endDate) as UserMetrics) };
-      // Reset numeric fields to zero before summing
-      (Object.keys(s) as Array<keyof UserMetrics>).forEach(key => {
-        if (typeof s[key] === 'number') (s as any)[key] = 0;
-      });
-
-      relevantRfcs.forEach(rfc => {
-        const memberStats = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
-        s.closedCases += memberStats.closedCases;
-        s.qa += memberStats.qa;
-        s.nsatInfo += memberStats.nsatInfo;
-        s.nsatClaims += memberStats.nsatClaims;
-        s.slaCompliance += memberStats.slaCompliance;
-        s.callsPerHour += memberStats.callsPerHour;
-        s.closedCasesPerHour += memberStats.closedCasesPerHour;
-        s.fcr += memberStats.fcr;
-      });
-
-      // Average the percentages/rates
-      s.qa /= relevantRfcs.length;
-      s.nsatInfo /= relevantRfcs.length;
-      s.nsatClaims /= relevantRfcs.length;
-      s.slaCompliance /= relevantRfcs.length;
-      s.callsPerHour /= relevantRfcs.length;
-      s.closedCasesPerHour /= relevantRfcs.length;
-      s.fcr /= relevantRfcs.length;
-
-      // Special handling for Opened Cases from DB
-      s.openedCases = dbCases.filter(c => relevantRfcs.includes(c.case_owner)).length;
-    } else {
-      s = { ...(getFilteredMetrics(memberRfc, startDate, endDate) as UserMetrics) };
-      s.openedCases = dbCases.filter(c => c.case_owner === memberRfc).length;
-    }
-
-    // Recalculate closed cases rate
-    const opened = s.openedCases || 1;
-    s.closedCasesRate = (s.closedCases / opened) * 100;
-    
-    return s;
-  };
-
   if (!user) return null;
-
-  const metrics = getAggregatedMetrics(user.rfc);
 
   const departments = ['CAC', 'Fleet', 'Premium'];
   
   const departmentStats = React.useMemo(() => {
     return departments.map(dept => {
-      const members = Object.values(MOCK_USERS).filter(u => u.serviceDesk === dept);
-      if (members.length === 0) return { name: dept, value: 0 };
+      // Find all agents in this department to match what a Leader of this dept would aggregate
+      const agents = Object.values(MOCK_USERS).filter(u => u.serviceDesk === dept && u.role === 'Agent');
       
-      const sum = members.reduce((acc, member) => {
-        const s = getAggregatedMetrics(member.rfc);
-        
-        if (kpi === 'productivity') {
-          return acc + (s.productivity || 0);
-        }
+      if (agents.length === 0) return { name: dept, performance: 0, productivity: 0 };
+      
+      // Calculate aggregated metrics for the department (same logic as AgentView for Leaders)
+      const rfcs = agents.map(u => u.rfc);
+      const agg = { ...(getFilteredMetrics(rfcs[0], startDate, endDate) as UserMetrics) };
+      
+      // Reset numeric fields to zero before summing
+      (Object.keys(agg) as Array<keyof UserMetrics>).forEach(key => {
+        if (typeof agg[key] === 'number') (agg as any)[key] = 0;
+      });
 
-        // Performance formula
-        const prod = ((s.closedCasesPerHour / 1) * 100 * 0.25) + 
-                     ((s.callsPerHour / 6) * 100 * 0.25) + 
-                     (s.fcr * 0.25) + 
-                     (s.closedCasesRate * 0.25);
-        const perf = (s.qa * 0.25) + 
-                     (s.nsatInfo * 0.125) + 
-                     (s.nsatClaims * 0.125) + 
-                     (prod * 0.25) + 
-                     (s.slaCompliance * 0.25);
-        return acc + perf;
-      }, 0);
+      rfcs.forEach(rfc => {
+        const s = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
+        agg.closedCases += s.closedCases;
+        agg.qa += s.qa;
+        agg.nsatInfo += s.nsatInfo;
+        agg.nsatClaims += s.nsatClaims;
+        agg.slaCompliance += s.slaCompliance;
+        agg.callsPerHour += s.callsPerHour;
+        agg.closedCasesPerHour += s.closedCasesPerHour;
+        agg.fcr += s.fcr;
+      });
+
+      // Averages for percentage/rate fields
+      agg.qa /= rfcs.length;
+      agg.nsatInfo /= rfcs.length;
+      agg.nsatClaims /= rfcs.length;
+      agg.slaCompliance /= rfcs.length;
+      agg.callsPerHour /= rfcs.length;
+      agg.closedCasesPerHour /= rfcs.length;
+      agg.fcr /= rfcs.length;
+
+      // Handle Opened Cases from DB for the whole department
+      agg.openedCases = dbCases.filter(c => rfcs.includes(c.case_owner)).length;
+      
+      // Recalculate closed cases rate for the aggregate
+      const opened = agg.openedCases || 1;
+      agg.closedCasesRate = (agg.closedCases / opened) * 100;
+
+      // Calculate the department KPI using the same formula as in AgentView
+      const closedPerHourScore = (agg.closedCasesPerHour / 1) * 100;
+      const callsPerHourScore = (agg.callsPerHour / 6) * 100;
+      const closedRateScore = Math.min(100, agg.closedCasesRate);
+      
+      const productivity = (closedPerHourScore * 0.25) + (callsPerHourScore * 0.25) + (agg.fcr * 0.25) + (closedRateScore * 0.25);
+      const performance = (agg.qa * 0.25) + (agg.nsatInfo * 0.125) + (agg.nsatClaims * 0.125) + (productivity * 0.25) + (agg.slaCompliance * 0.25);
       
       return {
         name: dept,
-        value: formatValue(sum / members.length)
+        performance: formatValue(performance),
+        productivity: formatValue(productivity),
+        // value field for backward compatibility with chart
+        value: formatValue(kpi === 'productivity' ? productivity : performance)
       };
     });
-  }, [startDate, endDate, kpi]);
+  }, [startDate, endDate, kpi, dbCases]);
 
   const generalStats = React.useMemo(() => {
-    const results = { performance: 0, productivity: 0 };
+    if (departmentStats.length === 0) return { performance: 0, productivity: 0 };
     
-    departments.forEach(dept => {
-      const members = Object.values(MOCK_USERS).filter(u => u.serviceDesk === dept);
-      if (members.length === 0) return;
-      
-      const deptSums = members.reduce((acc, member) => {
-        const s = getAggregatedMetrics(member.rfc);
-        
-        // Performance
-        const prod = ((s.closedCasesPerHour / 1) * 100 * 0.25) + 
-                     ((s.callsPerHour / 6) * 100 * 0.25) + 
-                     (s.fcr * 0.25) + 
-                     (s.closedCasesRate * 0.25);
-        const perf = (s.qa * 0.25) + 
-                     (s.nsatInfo * 0.125) + 
-                     (s.nsatClaims * 0.125) + 
-                     (prod * 0.25) + 
-                     (s.slaCompliance * 0.25);
-        
-        return {
-          performance: acc.performance + perf,
-          productivity: acc.productivity + (s.productivity || 0)
-        };
-      }, { performance: 0, productivity: 0 });
-
-      results.performance += (deptSums.performance / members.length);
-      results.productivity += (deptSums.productivity / members.length);
-    });
+    const performance = departmentStats.reduce((acc, d) => acc + d.performance, 0) / departmentStats.length;
+    const productivity = departmentStats.reduce((acc, d) => acc + d.productivity, 0) / departmentStats.length;
 
     return {
-      performance: formatValue(results.performance / departments.length),
-      productivity: formatValue(results.productivity / departments.length)
+      performance: formatValue(performance),
+      productivity: formatValue(productivity)
     };
-  }, [startDate, endDate]);
+  }, [departmentStats]);
 
   return (
     <Box>

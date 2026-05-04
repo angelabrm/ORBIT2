@@ -491,6 +491,28 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     currentUser?.role === 'Executive' ? 'team' : 'personal'
   );
   const [dbOpenedCases, setDbOpenedCases] = React.useState<number | null>(null);
+  const [selectedDept, setSelectedDept] = React.useState<string>('All');
+
+  // Team calculations for Management - moved up for dependency access
+  const teamRfcs = React.useMemo(() => {
+    let baseRfcs: string[] = [];
+    const isMan = currentUser?.role === 'Manager' || currentUser?.role === 'Executive';
+    
+    if (isMan) {
+      // If a specific dept is selected, Manager should see what that Dept's Leader sees (the Agents)
+      // If 'All' is selected, see all Agents across all depts to provide organization-wide aggregate
+      baseRfcs = Object.values(MOCK_USERS)
+        .filter(u => u.role === 'Agent')
+        .map(u => u.rfc);
+    } else {
+      baseRfcs = currentUser?.team || [];
+    }
+
+    if (selectedDept !== 'All') {
+      return baseRfcs.filter(rfc => MOCK_USERS[rfc]?.serviceDesk === selectedDept);
+    }
+    return baseRfcs;
+  }, [currentUser, selectedDept]);
 
   const handleHierarchyClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     setHierarchyAnchor(event.currentTarget);
@@ -508,16 +530,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       let rfcsToFetch: string[] = [];
       if (currentUser.role === "Agent") {
         rfcsToFetch = [currentUser.rfc];
-      } else if (currentUser.role === "Leader") {
-        // Sum of all Agents in their department
-        rfcsToFetch = Object.values(MOCK_USERS)
-          .filter(u => u.role === "Agent" && u.serviceDesk === currentUser.serviceDesk)
-          .map(u => u.rfc);
-      } else if (currentUser.role === "Manager" || currentUser.role === "Executive") {
-        // Sum of all Agents and Leaders in the complete team
-        rfcsToFetch = Object.values(MOCK_USERS)
-          .filter(u => u.role === "Agent" || u.role === "Leader")
-          .map(u => u.rfc);
+      } else if (isManagement) {
+        rfcsToFetch = teamRfcs;
       }
 
       if (rfcsToFetch.length > 0) {
@@ -529,24 +543,15 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       }
     };
     loadDbData();
-  }, [currentUser, startDate, endDate]);
+  }, [currentUser, startDate, endDate, teamRfcs, isManagement]);
 
   const stats = React.useMemo(() => {
     if (!currentUser) return null;
     
     let baseStats: UserMetrics;
     
-    if (currentUser.role === 'Leader' || currentUser.role === 'Manager' || currentUser.role === 'Executive') {
-      let rfcsToAggregate: string[] = [];
-      if (currentUser.role === 'Leader') {
-        rfcsToAggregate = Object.values(MOCK_USERS)
-          .filter(u => u.role === "Agent" && u.serviceDesk === currentUser.serviceDesk)
-          .map(u => u.rfc);
-      } else {
-        rfcsToAggregate = Object.values(MOCK_USERS)
-          .filter(u => u.role === "Agent" || u.role === "Leader")
-          .map(u => u.rfc);
-      }
+    if (isManagement) {
+      const rfcsToAggregate = teamRfcs;
       
       if (rfcsToAggregate.length > 0) {
         baseStats = { ...(getFilteredMetrics(rfcsToAggregate[0], startDate, endDate) as UserMetrics) };
@@ -591,7 +596,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       baseStats.openedCases = dbOpenedCases;
     }
     return baseStats;
-  }, [currentUser, startDate, endDate, dbOpenedCases]);
+  }, [currentUser, startDate, endDate, dbOpenedCases, teamRfcs, isManagement]);
 
   // Derived calculations for standard agent (move to top level hooks)
   const calcResults = React.useMemo(() => {
@@ -813,16 +818,6 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     'Backlog Team': 'teamBacklog'
   };
 
-  // Team calculations for Management
-  const teamRfcs = React.useMemo(() => {
-    if (currentUser?.role === 'Manager' || currentUser?.role === 'Executive') {
-      return Object.values(MOCK_USERS)
-        .filter(u => u.role === 'Agent' || u.role === 'Leader')
-        .map(u => u.rfc);
-    }
-    return currentUser?.team || [];
-  }, [currentUser]);
-
   const teamStats = React.useMemo(() => {
     if (!isManagement) return [];
     return teamRfcs.map(rfc => {
@@ -991,19 +986,32 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const adhCompAll = allMemberSchedules.flat().filter(s => s.adhType === 'complete').length;
     const adhIncompAll = allMemberSchedules.flat().filter(s => s.adhType === 'incomplete').length;
 
-    const homeRate = totalBusinessDaysAll > 0 ? (homeDaysTakenAll / totalBusinessDaysAll) * 100 : 0;
-    const attRate = pastBusinessDaysTotal > 0 ? (attDaysAll / pastBusinessDaysTotal) * 100 : 100;
+    // Average Home Office Rate (Average of individual rates)
+    const memberHomeRates = teamRfcs.map(rfc => {
+      const mStats = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
+      const total = mStats.homeOffice.workedHome + mStats.homeOffice.workedOffice;
+      return total > 0 ? (mStats.homeOffice.workedHome / total) * 100 : 0;
+    });
+    const avgHomeRate = memberHomeRates.reduce((a, b) => a + b, 0) / (teamRfcs.length || 1);
+
+    // Average Attendance Rate (Average of individual rates)
+    const memberAttRates = allMemberSchedules.map(sch => {
+        const past = sch.filter(s => s.date.isBefore(dayjs().startOf('day')));
+        const att = past.filter(s => s.attType === 'attendance').length;
+        return past.length > 0 ? (att / past.length) * 100 : 100;
+    });
+    const avgAttRate = memberAttRates.reduce((a, b) => a + b, 0) / (teamRfcs.length || 1);
     
     // Average Adherence
     const teamAdherenceAvg = teamRfcs.reduce((acc, rfc) => {
         const s = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
         return acc + (s.adherence || 0);
-    }, 0) / teamRfcs.length;
+    }, 0) / (teamRfcs.length || 1);
 
     return {
         daySummaries,
-        homeRate,
-        attRate,
+        homeRate: avgHomeRate,
+        attRate: avgAttRate,
         adhRate: teamAdherenceAvg,
         totalBusinessDays: totalBusinessDays, // keeping single business days count per member for "My Team Data" labeling
         totalBusinessDaysTeam: totalBusinessDaysAll,
@@ -1587,6 +1595,26 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
               >
                 My Team Data
               </Button>
+              {adminViewType === 'team' && (
+                <FormControl size="small" sx={{ minWidth: 130 }}>
+                  <Select
+                    value={selectedDept}
+                    onChange={(e) => setSelectedDept(e.target.value as string)}
+                    sx={{ 
+                      height: 31, 
+                      fontSize: 10, 
+                      fontWeight: 800,
+                      bgcolor: theme.palette.mode === 'dark' ? 'rgba(11, 160, 175, 0.1)' : 'white',
+                      '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(11, 160, 175, 0.3)' }
+                    }}
+                  >
+                    <MenuItem value="All" sx={{ fontSize: 10, fontWeight: 800 }}>ALL DEPARTMENTS</MenuItem>
+                    <MenuItem value="CAC" sx={{ fontSize: 10, fontWeight: 800 }}>CAC</MenuItem>
+                    <MenuItem value="Fleet" sx={{ fontSize: 10, fontWeight: 800 }}>FLEET</MenuItem>
+                    <MenuItem value="Premium" sx={{ fontSize: 10, fontWeight: 800 }}>PREMIUM</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
             </Box>
           )}
         </Box>
@@ -1598,7 +1626,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
               title={isTeamView ? "Avg. Home Office Rate" : "Home Office Rate"} 
               value={`${displayStats.homeOfficeRate.toFixed(1)}%`} 
               icon={<Briefcase size={24} />} 
-              formula={isTeamView ? "(Σ Home Days / Σ Business Days) * 100" : "(Home Days / Total Business Days) * 100"}
+              formula={isTeamView ? "Σ(Member Home Rate) / Team Size" : "(Home Days / Total Business Days) * 100"}
               color={displayStats.homeOfficeRate <= 40 ? '#b9e04d' : '#ea5713'}
               description={isTeamView ? "The collective average percentage of business days spent working from home by your team." : "The percentage of your business days spent working from home. Goal: Max 40%."}
               onClick={() => setActiveAdminTab(activeAdminTab === 'homeOffice' ? null : 'homeOffice')}
@@ -1611,7 +1639,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
               title={isTeamView ? "Avg. Attendance Rate" : "Attendance Rate"} 
               value={`${displayStats.attendanceRate.toFixed(1)}%`} 
               icon={<CheckCircle2 size={24} />} 
-              formula={isTeamView ? "(Σ Attendance / Σ Past Business Days) * 100" : "(Attendance Days / Total Past Business Days) * 100"}
+              formula={isTeamView ? "Σ(Member Attendance Rate) / Team Size" : "(Attendance Days / Total Past Business Days) * 100"}
               color={getKpiColor(displayStats.attendanceRate)}
               description={isTeamView ? "The collective average percentage of days team members were present at work." : "The percentage of days you were present at work during the selected period."}
               onClick={() => setActiveAdminTab(activeAdminTab === 'attendance' ? null : 'attendance')}
