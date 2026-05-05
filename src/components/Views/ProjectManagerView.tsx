@@ -60,83 +60,85 @@ const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
     loadData();
   }, [startDate, endDate]);
 
+  const calculatePerfProd = (rfcs: string[]) => {
+    if (rfcs.length === 0) return { productivity: 0, performance: 0 };
+
+    // 1. Aggregate metrics for these RFCs
+    const baseStats = { ...(getFilteredMetrics(rfcs[0], startDate, endDate) as UserMetrics) };
+    (Object.keys(baseStats) as Array<keyof UserMetrics>).forEach(key => {
+      if (typeof baseStats[key] === 'number') (baseStats as any)[key] = 0;
+    });
+
+    rfcs.forEach(rfc => {
+      const s = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
+      baseStats.closedCases += s.closedCases;
+      baseStats.qa += s.qa;
+      baseStats.nsatInfo += s.nsatInfo;
+      baseStats.nsatClaims += s.nsatClaims;
+      baseStats.slaCompliance += s.slaCompliance;
+      baseStats.callsPerHour += s.callsPerHour;
+      baseStats.closedCasesPerHour += s.closedCasesPerHour;
+      baseStats.fcr += s.fcr;
+    });
+
+    baseStats.qa /= rfcs.length;
+    baseStats.nsatInfo /= rfcs.length;
+    baseStats.nsatClaims /= rfcs.length;
+    baseStats.slaCompliance /= rfcs.length;
+    baseStats.callsPerHour /= rfcs.length;
+    baseStats.closedCasesPerHour /= rfcs.length;
+    baseStats.fcr /= rfcs.length;
+
+    // Opened cases from DB
+    const openedCases = dbCases.filter(c => rfcs.includes(c.case_owner)).length || 1;
+    const closedCasesRateScore = Math.min(100, (baseStats.closedCases / openedCases) * 100);
+
+    // 2. Final scores matching AgentView.tsx exactly
+    const closedPerHourScore = (baseStats.closedCasesPerHour / 1) * 100;
+    const callsPerHourScore = (baseStats.callsPerHour / 6) * 100;
+    
+    const productivity = (closedPerHourScore * 0.25) + (callsPerHourScore * 0.25) + (baseStats.fcr * 0.25) + (closedCasesRateScore * 0.25);
+    const performance = (baseStats.qa * 0.25) + (baseStats.nsatInfo * 0.125) + (baseStats.nsatClaims * 0.125) + (productivity * 0.25) + (baseStats.slaCompliance * 0.25);
+
+    return { productivity, performance };
+  };
+
   if (!user) return null;
+
+  // Note: metrics removed as it depended on getAggregatedMetrics
+  // If needed later, use calculatePerfProd([user.rfc])
 
   const departments = ['CAC', 'Fleet', 'Premium'];
   
   const departmentStats = React.useMemo(() => {
     return departments.map(dept => {
-      // Find all agents in this department to match what a Leader of this dept would aggregate
-      const agents = Object.values(MOCK_USERS).filter(u => u.serviceDesk === dept && u.role === 'Agent');
+      const agentsInDept = Object.values(MOCK_USERS)
+        .filter(u => u.serviceDesk === dept && u.role === 'Agent')
+        .map(u => u.rfc);
       
-      if (agents.length === 0) return { name: dept, performance: 0, productivity: 0 };
+      if (agentsInDept.length === 0) return { name: dept, value: 0 };
       
-      // Calculate aggregated metrics for the department (same logic as AgentView for Leaders)
-      const rfcs = agents.map(u => u.rfc);
-      const agg = { ...(getFilteredMetrics(rfcs[0], startDate, endDate) as UserMetrics) };
-      
-      // Reset numeric fields to zero before summing
-      (Object.keys(agg) as Array<keyof UserMetrics>).forEach(key => {
-        if (typeof agg[key] === 'number') (agg as any)[key] = 0;
-      });
-
-      rfcs.forEach(rfc => {
-        const s = getFilteredMetrics(rfc, startDate, endDate) as UserMetrics;
-        agg.closedCases += s.closedCases;
-        agg.qa += s.qa;
-        agg.nsatInfo += s.nsatInfo;
-        agg.nsatClaims += s.nsatClaims;
-        agg.slaCompliance += s.slaCompliance;
-        agg.callsPerHour += s.callsPerHour;
-        agg.closedCasesPerHour += s.closedCasesPerHour;
-        agg.fcr += s.fcr;
-      });
-
-      // Averages for percentage/rate fields
-      agg.qa /= rfcs.length;
-      agg.nsatInfo /= rfcs.length;
-      agg.nsatClaims /= rfcs.length;
-      agg.slaCompliance /= rfcs.length;
-      agg.callsPerHour /= rfcs.length;
-      agg.closedCasesPerHour /= rfcs.length;
-      agg.fcr /= rfcs.length;
-
-      // Handle Opened Cases from DB for the whole department
-      agg.openedCases = dbCases.filter(c => rfcs.includes(c.case_owner)).length;
-      
-      // Recalculate closed cases rate for the aggregate
-      const opened = agg.openedCases || 1;
-      agg.closedCasesRate = (agg.closedCases / opened) * 100;
-
-      // Calculate the department KPI using the same formula as in AgentView
-      const closedPerHourScore = (agg.closedCasesPerHour / 1) * 100;
-      const callsPerHourScore = (agg.callsPerHour / 6) * 100;
-      const closedRateScore = Math.min(100, agg.closedCasesRate);
-      
-      const productivity = (closedPerHourScore * 0.25) + (callsPerHourScore * 0.25) + (agg.fcr * 0.25) + (closedRateScore * 0.25);
-      const performance = (agg.qa * 0.25) + (agg.nsatInfo * 0.125) + (agg.nsatClaims * 0.125) + (productivity * 0.25) + (agg.slaCompliance * 0.25);
+      const { productivity, performance } = calculatePerfProd(agentsInDept);
       
       return {
         name: dept,
-        performance: formatValue(performance),
-        productivity: formatValue(productivity),
-        // value field for backward compatibility with chart
         value: formatValue(kpi === 'productivity' ? productivity : performance)
       };
     });
   }, [startDate, endDate, kpi, dbCases]);
 
   const generalStats = React.useMemo(() => {
-    if (departmentStats.length === 0) return { performance: 0, productivity: 0 };
+    const allAgentsRfcs = Object.values(MOCK_USERS)
+      .filter(u => u.role === 'Agent')
+      .map(u => u.rfc);
     
-    const performance = departmentStats.reduce((acc, d) => acc + d.performance, 0) / departmentStats.length;
-    const productivity = departmentStats.reduce((acc, d) => acc + d.productivity, 0) / departmentStats.length;
+    const { productivity, performance } = calculatePerfProd(allAgentsRfcs);
 
     return {
       performance: formatValue(performance),
       productivity: formatValue(productivity)
     };
-  }, [departmentStats]);
+  }, [startDate, endDate, dbCases]);
 
   return (
     <Box>
