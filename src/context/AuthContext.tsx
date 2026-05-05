@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useRef, ReactNode } from 'react';
 import { User, MOCK_USERS } from '../data/mockData';
 
 import dayjs, { Dayjs } from 'dayjs';
@@ -24,10 +24,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [selectedMember, setSelectedMember] = useState<User | null>(null);
+  const [selectedMember, setSelectedMemberRaw] = useState<User | null>(null);
   const [managementTab, setManagementTab] = useState<ManagementTab>("Operational");
   const [startDate, setStartDate] = useState<Dayjs>(dayjs().startOf('month'));
   const [endDate, setEndDate] = useState<Dayjs>(dayjs());
+  const previousTabRef = useRef<ManagementTab | null>(null);
+
+  // Wraps raw setter: switches to Operational when a member is selected,
+  // and restores the previous tab when going back.
+  const setSelectedMember = (member: User | null) => {
+    if (member !== null) {
+      previousTabRef.current = managementTab;
+      setManagementTab('Operational');
+    } else if (previousTabRef.current !== null) {
+      setManagementTab(previousTabRef.current);
+      previousTabRef.current = null;
+    }
+    setSelectedMemberRaw(member);
+  };
 
   const login = (rfc: string) => {
     const foundUser = MOCK_USERS[rfc.toUpperCase()];

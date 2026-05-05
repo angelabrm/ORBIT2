@@ -42,7 +42,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
   const theme = useTheme();
-  const { user, logout, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
+  const { user, logout, selectedMember, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
 
   const isLeader = user?.role === 'Leader';
   const isManager = user?.role === 'Manager' || user?.role === 'Executive';
@@ -235,7 +235,7 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
             >
               Administrative
             </Box>
-            {user?.role === 'Executive' && (
+            {user?.role === 'Executive' && !selectedMember && (
               <Box 
                 onClick={() => setManagementTab('Financial')}
                 sx={{ 
