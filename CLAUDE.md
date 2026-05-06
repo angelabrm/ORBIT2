@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> For full product requirements, business rules, role hierarchy, and implementation roadmap see [PRD.md](PRD.md).
+
 ## Commands
 
 ```bash
@@ -35,31 +37,56 @@ server.ts (Express)
 src/
   ├── context/AuthContext.tsx   → Global auth, selectedMember, managementTab, dateRange
   ├── services/apiService.ts    → fetchOpenedCases(), checkApiHealth()
-  ├── data/mockData.ts          → MOCK_USERS, METRICS_DATA, getFilteredMetrics()
+  ├── data/mockData.ts          → MOCK_USERS (manual copy of Roster), METRICS_DATA, getFilteredMetrics()
   └── components/
         ├── App.tsx             → ThemeProvider + AuthProvider + Login/Dashboard routing
         ├── Dashboard.tsx       → Role dispatch → correct View component
         ├── Sidebar.tsx         → Date pickers (dayjs), member selection, collapsible
         ├── Header.tsx          → Navigation bar
         └── Views/
-              ├── AgentView.tsx           → Agent/Staff/Leader (~1938 lines, most complex)
+              ├── AgentView.tsx           → Agent/Leader view (~1938 lines, most complex)
               ├── ProjectManagerView.tsx  → Manager/Executive operational metrics
-              ├── FinancialView.tsx       → Financial KPIs
-              └── ExecutiveView.tsx       → Executive summary
+              ├── FinancialView.tsx       → Financial KPIs (Executive only)
+              └── ExecutiveView.tsx       → Executive global KPIs + multi-client charts (exists but not yet wired into Dashboard routing)
 ```
 
 ### Role system
 
-Roles: `Agent | Staff | Leader | Manager | Executive`  
+Roles: `Agent | Leader | Manager | Executive | PM`
+
+- **`Staff`** — previously defined in the type but has no users and no logic. **Eliminated.**
+- **`PM`** — exclusive to Pepsico. Manages projects, does not supervise agents. Views not yet defined. Pending implementation.
+
 ServiceDesks: `CAC | Fleet | Premium | Manager | Executive`
 
-Leaders and above see a **management tab** switcher (`Operational | Administrative | Financial`) stored in `AuthContext`. The active tab determines which View renders inside `Dashboard.tsx`.
+**Tab switcher** (`Operational | Administrative | Financial`) is visible to Leaders and above, stored in `AuthContext`. The active tab determines which View renders inside `Dashboard.tsx`.
 
-Leaders can **drill into a team member** — selecting a member sets `AuthContext.selectedMember`, which renders that member's `AgentView` with a back button.
+| Role | Operational | Administrative | Financial |
+|------|:-----------:|:--------------:|:---------:|
+| Agent | ✅ own view | ✅ own view | ❌ |
+| Leader | ✅ team view | ✅ team view | ❌ |
+| Manager | ✅ | ✅ | ❌ |
+| Executive | ✅ | ✅ | ✅ |
+| PM | TBD | TBD | ❌ |
 
-### Mock vs. live data
+**Drilling navigation:**
+- Executive or Manager clicks a bar in the "Average Performance by Department" chart (Operational tab) → renders that department's Leader view.
+- Executive, Manager, or Leader selects a name from the Sidebar dropdown → renders that Agent's view with a back button (`AuthContext.selectedMember`).
 
-The app uses a hybrid approach: `mockData.ts` provides in-memory user profiles and metrics (filtered by the global date range from `AuthContext`), while `/api/opened-cases` hits the real database when configured. Both code paths coexist in the Views.
+### Client isolation
+
+- **Executive**: sees all clients (Stellantis + Pepsico).
+- **Manager, Leader, Agent**: only see their own client. Stellantis roles have no access to Pepsico data and vice versa.
+- **Pepsico**: currently only present in the Executive's Financial tab. All other Pepsico views (PM role, operational data) are pending implementation.
+
+### Data sources
+
+| Data | Current source | Notes |
+|------|---------------|-------|
+| Roster / User login | `mockData.ts` (manual copy of Google Sheets) | Google Sheets live integration is **pending implementation** |
+| Agent metrics | `mockData.ts` with pseudo-random fluctuation by date range | |
+| Opened cases | Neon PostgreSQL via `/api/opened-cases` | Functional |
+| Financial data | Hardcoded mock in `FinancialView.tsx` | Executive only |
 
 ### Styling
 
