@@ -1,9 +1,9 @@
 
 import dayjs from 'dayjs';
 
-export type Role = "Agent" | "Staff" | "Leader" | "Manager" | "Executive";
+export type Role = "Agent" | "Leader" | "Manager" | "Executive" | "PM";
 
-export type ServiceDesk = "CAC" | "Fleet" | "Premium" | "Manager" | "Executive";
+export type ServiceDesk = "CAC" | "Fleet" | "Premium" | "Manager" | "Executive" | "PM";
 
 export interface User {
   rfc: string;
@@ -14,65 +14,6 @@ export interface User {
   team?: string[]; // For Leaders: RFCs of team members
 }
 
-export const MOCK_USERS: Record<string, User> = {
-  // CAC DEPT
-  "GHT920317ABC": { rfc: "GHT920317ABC", name: "Lucia Avellaneda", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "HJK922981BNM": { rfc: "HJK922981BNM", name: "Marco Torres", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "JKL780123MNO": { rfc: "JKL780123MNO", name: "Sarai Torres", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "MNB790139POI": { rfc: "MNB790139POI", name: "Marco Jimenez", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "TUV820327JKL": { rfc: "TUV820327JKL", name: "Laura Gomez", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "GARC780912KQ2": { rfc: "GARC780912KQ2", name: "Luz Salcedo", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "LOPE850623HGT": { rfc: "LOPE850623HGT", name: "Sandra Avellaneda", role: "Agent", client: "Stellantis", serviceDesk: "CAC" },
-  "RAMI860812VY4": { 
-    rfc: "RAMI860812VY4", 
-    name: "Carlos Rodriguez", 
-    role: "Leader", 
-    client: "Stellantis", 
-    serviceDesk: "CAC",
-    team: ["GHT920317ABC", "HJK922981BNM", "JKL780123MNO", "MNB790139POI", "TUV820327JKL", "GARC780912KQ2", "LOPE850623HGT"]
-  },
-
-  // EXECUTIVE
-  "VELA750430LKM": { rfc: "VELA750430LKM", name: "David Rojas", role: "Executive", client: "Stellantis", serviceDesk: "Executive" },
-
-  // FLEET DEPT
-  "ASD271209QAZ": { rfc: "ASD271209QAZ", name: "Yoana Jimenez", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "BNV940327ASD": { rfc: "BNV940327ASD", name: "Bibiana Avellaneda", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "CVB342987EDC": { rfc: "CVB342987EDC", name: "Jose Jimenez", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "FGH924398WSX": { rfc: "FGH924398WSX", name: "Sandra Perez", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "HERN910930WQ7": { rfc: "HERN910930WQ7", name: "Yoana Gomez", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "MORA920415PL9": { rfc: "MORA920415PL9", name: "Marco Avellaneda", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "PERE650728JH5": { rfc: "PERE650728JH5", name: "Sarai Avellaneda", role: "Agent", client: "Stellantis", serviceDesk: "Fleet" },
-  "RODR830214MNB": { 
-    rfc: "RODR830214MNB", 
-    name: "Jose Rodriguez", 
-    role: "Leader", 
-    client: "Stellantis", 
-    serviceDesk: "Fleet",
-    team: ["ASD271209QAZ", "BNV940327ASD", "CVB342987EDC", "FGH924398WSX", "HERN910930WQ7", "MORA920415PL9", "PERE650728JH5"]
-  },
-
-  // MANAGER
-  "TORR940621BDF": { rfc: "TORR940621BDF", name: "Roberto Sanchez", role: "Manager", client: "Pepsico", serviceDesk: "Manager" },
-
-  // PREMIUM DEPT
-  "PLM830412X9Z": { rfc: "PLM830412X9Z", name: "Bibiana Jimenez", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "QWE620328FGH": { rfc: "QWE620328FGH", name: "Nancy Torres", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "RST710928QWE": { rfc: "RST710928QWE", name: "Daniela Gomez", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "YTR210219LKM": { rfc: "YTR210219LKM", name: "Santiago Lopez", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "ZXC120928RTY": { rfc: "ZXC120928RTY", name: "Felipe Torres", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "CAST890917QWE": { rfc: "CAST890917QWE", name: "Lucio Perez", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "CRUZ700105ZXC": { rfc: "CRUZ700105ZXC", name: "Martin Gomez", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "FLOR960228RT8": { rfc: "FLOR960228RT8", name: "Martina Jimenez", role: "Agent", client: "Stellantis", serviceDesk: "Premium" },
-  "SANC990301XTR": { 
-    rfc: "SANC990301XTR", 
-    name: "Marcela Rodriguez", 
-    role: "Leader", 
-    client: "Stellantis", 
-    serviceDesk: "Premium",
-    team: ["PLM830412X9Z", "QWE620328FGH", "RST710928QWE", "YTR210219LKM", "ZXC120928RTY", "CAST890917QWE", "CRUZ700105ZXC", "FLOR960228RT8"]
-  }
-};
 
 export interface UserMetrics {
   qa: number;

@@ -1,6 +1,6 @@
 
-import React, { createContext, useContext, useState, useRef, ReactNode } from 'react';
-import { User, MOCK_USERS } from '../data/mockData';
+import React, { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
+import { User } from '../data/mockData';
 
 import dayjs, { Dayjs } from 'dayjs';
 
@@ -8,7 +8,8 @@ export type ManagementTab = "Operational" | "Administrative" | "Financial";
 
 interface AuthContextType {
   user: User | null;
-  login: (rfc: string) => boolean;
+  users: Record<string, User>;
+  login: (rfc: string) => Promise<boolean>;
   logout: () => void;
   selectedMember: User | null;
   setSelectedMember: (user: User | null) => void;
@@ -24,14 +25,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<Record<string, User>>({});
   const [selectedMember, setSelectedMemberRaw] = useState<User | null>(null);
   const [managementTab, setManagementTab] = useState<ManagementTab>("Operational");
   const [startDate, setStartDate] = useState<Dayjs>(dayjs().startOf('month'));
   const [endDate, setEndDate] = useState<Dayjs>(dayjs());
   const previousTabRef = useRef<ManagementTab | null>(null);
 
-  // Wraps raw setter: switches to Operational when a member is selected,
-  // and restores the previous tab when going back.
+  useEffect(() => {
+    fetch('/api/roster')
+      .then(r => r.json())
+      .then((roster: User[]) => {
+        const map: Record<string, User> = {};
+        roster.forEach(u => { map[u.rfc] = u; });
+        setUsers(map);
+      })
+      .catch(() => {});
+  }, []);
+
   const setSelectedMember = (member: User | null) => {
     if (member !== null) {
       previousTabRef.current = managementTab;
@@ -43,13 +54,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setSelectedMemberRaw(member);
   };
 
-  const login = (rfc: string) => {
-    const foundUser = MOCK_USERS[rfc.toUpperCase()];
-    if (foundUser) {
-      setUser(foundUser);
-      return true;
+  const login = async (rfc: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rfc: rfc.toUpperCase().trim() }),
+      });
+      if (res.ok) {
+        const foundUser: User = await res.json();
+        setUser(foundUser);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
@@ -58,11 +78,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      login, 
-      logout, 
-      selectedMember, 
+    <AuthContext.Provider value={{
+      user,
+      users,
+      login,
+      logout,
+      selectedMember,
       setSelectedMember,
       managementTab,
       setManagementTab,

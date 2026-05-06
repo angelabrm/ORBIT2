@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Box, Typography, TextField, Button, Paper, useTheme, IconButton, Switch } from '@mui/material';
+import { Box, Typography, TextField, Button, Paper, useTheme, IconButton, Switch, CircularProgress } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'motion/react';
 import { Orbit as OrbitIcon, Sun, Moon } from 'lucide-react';
@@ -13,14 +13,16 @@ interface LoginProps {
 const Login: React.FC<LoginProps> = ({ mode, toggleTheme }) => {
   const [rfc, setRfc] = useState('');
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const theme = useTheme();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!login(rfc)) {
-      setError(true);
-    }
+    setLoading(true);
+    const ok = await login(rfc);
+    setLoading(false);
+    if (!ok) setError(true);
   };
 
   return (
@@ -167,7 +169,7 @@ const Login: React.FC<LoginProps> = ({ mode, toggleTheme }) => {
                   setError(false);
                 }}
                 error={error}
-                helperText={error ? "Invalid RFC. Try AGENT01, LEADER01, PM01" : ""}
+                helperText={error ? "RFC no encontrado en el Roster" : ""}
                 slotProps={{
                   input: {
                     sx: { 
@@ -182,13 +184,14 @@ const Login: React.FC<LoginProps> = ({ mode, toggleTheme }) => {
                 type="submit"
                 variant="contained"
                 size="large"
+                disabled={loading}
                 sx={{
                   py: 1.5,
                   fontSize: '1.1rem',
                   background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.primary.light})`,
                 }}
               >
-                Access System
+                {loading ? <CircularProgress size={24} color="inherit" /> : 'Access System'}
               </Button>
             </Box>
           </form>

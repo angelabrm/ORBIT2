@@ -33,7 +33,6 @@ import { useAuth } from '../context/AuthContext';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import dayjs from 'dayjs';
-import { MOCK_USERS } from '../data/mockData';
 
 interface SidebarProps {
   mode: 'light' | 'dark';
@@ -42,7 +41,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
   const theme = useTheme();
-  const { user, logout, selectedMember, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
+  const { user, users, logout, selectedMember, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
 
   const isLeader = user?.role === 'Leader';
   const isManager = user?.role === 'Manager' || user?.role === 'Executive';
@@ -279,7 +278,7 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
               onChange={(e) => {
                 const memberRfc = e.target.value as string;
                 if (memberRfc) {
-                  setSelectedMember(MOCK_USERS[memberRfc]);
+                  setSelectedMember(users[memberRfc]);
                 }
               }}
               sx={{ 
@@ -295,12 +294,12 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
               
               {isLeader && user?.team?.map((rfc) => (
                 <MenuItem key={rfc} value={rfc}>
-                  {MOCK_USERS[rfc]?.name || rfc}
+                  {users[rfc]?.name || rfc}
                 </MenuItem>
               ))}
 
               {isManager && ["CAC", "Fleet", "Premium"].map((dept) => {
-                const deptAgents = Object.values(MOCK_USERS).filter(u => u.role === 'Agent' && u.serviceDesk === dept);
+                const deptAgents = Object.values(users).filter(u => u.role === 'Agent' && u.serviceDesk === dept);
                 if (deptAgents.length === 0) return null;
                 
                 return [

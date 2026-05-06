@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
-import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData, MOCK_USERS } from '../../data/mockData';
+import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
 import { fetchOpenedCases } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
@@ -473,7 +473,7 @@ interface AgentViewProps {
 }
 
 const AgentView: React.FC<AgentViewProps> = ({ member }) => {
-  const { user, managementTab, startDate, endDate } = useAuth();
+  const { user, users, managementTab, startDate, endDate } = useAuth();
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   
@@ -497,7 +497,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const teamRfcs = React.useMemo(() => {
     let baseRfcs: string[] = [];
     if (currentUser?.role === 'Manager' || currentUser?.role === 'Executive') {
-      baseRfcs = Object.values(MOCK_USERS)
+      baseRfcs = Object.values(users)
         .filter(u => u.role === 'Agent' || u.role === 'Leader')
         .map(u => u.rfc);
     } else {
@@ -505,7 +505,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     }
 
     if (selectedDept !== 'All') {
-      return baseRfcs.filter(rfc => MOCK_USERS[rfc]?.serviceDesk === selectedDept);
+      return baseRfcs.filter(rfc => users[rfc]?.serviceDesk === selectedDept);
     }
     return baseRfcs;
   }, [currentUser, selectedDept]);
@@ -621,7 +621,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     if (!currentUser || currentUser.role !== 'Agent') return null;
     
     // Find my leader's team to ensure consistency with Leader's view
-    const myLeader = Object.values(MOCK_USERS).find(u => u.role === 'Leader' && u.serviceDesk === currentUser.serviceDesk);
+    const myLeader = Object.values(users).find(u => u.role === 'Leader' && u.serviceDesk === currentUser.serviceDesk);
     if (!myLeader || !myLeader.team) return null;
     
     // Calculate performance for each team member
@@ -831,8 +831,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
       return {
         rfc,
-        name: MOCK_USERS[rfc]?.name.split(' ')[0] || rfc,
-        fullName: MOCK_USERS[rfc]?.name || rfc,
+        name: users[rfc]?.name.split(' ')[0] || rfc,
+        fullName: users[rfc]?.name || rfc,
         stats: s,
         performance: perf,
         productivity: prod,
@@ -1110,7 +1110,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           <Grid size={8}>
             <Paper sx={{ p: 3, height: 450 }}>
               <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 1, display: 'block' }}>
-                {currentIndicator} Over Time (Average vs {selectedTeamMember ? MOCK_USERS[selectedTeamMember].name : 'Individual'})
+                {currentIndicator} Over Time (Average vs {selectedTeamMember ? users[selectedTeamMember]?.name ?? selectedTeamMember : 'Individual'})
               </Typography>
               <ResponsiveContainer width="100%" height="90%">
                 <LineChart data={aggregatedTrendData}>

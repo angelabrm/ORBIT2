@@ -33,7 +33,7 @@ import {
   LabelList
 } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
-import { METRICS_DATA, getFilteredMetrics, MOCK_USERS, UserMetrics } from '../../data/mockData';
+import { METRICS_DATA, getFilteredMetrics, UserMetrics } from '../../data/mockData';
 import { fetchOpenedCases } from '../../services/apiService';
 import dayjs from 'dayjs';
 
@@ -43,7 +43,7 @@ const formatValue = (val: any) => {
 };
 
 const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
-  const { user: authUser, startDate, endDate, setSelectedMember } = useAuth();
+  const { user: authUser, users, startDate, endDate, setSelectedMember } = useAuth();
   const theme = useTheme();
   const user = member || authUser;
   
@@ -112,7 +112,7 @@ const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
   
   const departmentStats = React.useMemo(() => {
     return departments.map(dept => {
-      const agentsInDept = Object.values(MOCK_USERS)
+      const agentsInDept = Object.values(users)
         .filter(u => u.serviceDesk === dept && u.role === 'Agent')
         .map(u => u.rfc);
       
@@ -128,7 +128,7 @@ const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
   }, [startDate, endDate, kpi, dbCases]);
 
   const generalStats = React.useMemo(() => {
-    const allAgentsRfcs = Object.values(MOCK_USERS)
+    const allAgentsRfcs = Object.values(users)
       .filter(u => u.role === 'Agent')
       .map(u => u.rfc);
     
@@ -245,15 +245,10 @@ const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
                         fill={index % 2 === 0 ? theme.palette.primary.main : theme.palette.secondary.main} 
                         style={{ cursor: 'pointer' }}
                         onClick={() => {
-                          const leaderMap: Record<string, string> = {
-                            'CAC': 'RAMI860812VY4',
-                            'Fleet': 'RODR830214MNB',
-                            'Premium': 'SANC990301XTR'
-                          };
-                          const leaderRfc = leaderMap[entry.name];
-                          if (leaderRfc) {
-                            setSelectedMember(MOCK_USERS[leaderRfc]);
-                          }
+                          const leader = Object.values(users).find(
+                            u => u.role === 'Leader' && u.serviceDesk === entry.name
+                          );
+                          if (leader) setSelectedMember(leader);
                         }}
                       />
                     ))}
