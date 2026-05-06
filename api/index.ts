@@ -2,7 +2,6 @@ import express from 'express';
 import pg from 'pg';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
-import { google } from 'googleapis';
 
 dayjs.extend(customParseFormat);
 const { Pool } = pg;
@@ -15,7 +14,7 @@ app.use(express.json());
 const dbUrl = process.env.DATABASE_URL || process.env.NEON_DB_URL;
 const pool = dbUrl ? new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } }) : null;
 
-// --- Google Sheets / Roster ---
+// --- Google Sheets / Roster (public CSV export — no auth needed) ---
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID || '122mX8Jh0w5HP7JwW21mKHTDN2h0YhQuQYHhumHAcm4s';
 const SHEET_NAME = 'Roster';
@@ -32,6 +31,30 @@ interface RosterUser {
 
 let rosterCache: RosterUser[] = [];
 let rosterLastFetched = 0;
+
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { field += ch; }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (ch === '\r') { /* skip */ }
+      else { field += ch; }
+    }
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
 
 function mapRole(nivel: string): string | null {
   const n = nivel?.trim().toLowerCase();
@@ -55,31 +78,15 @@ function mapServiceDesk(mesa: string): string {
 }
 
 async function fetchRosterFromSheets(): Promise<RosterUser[]> {
-  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY || '';
-  // Handle both real newlines (from Vercel) and escaped \n (from .env files)
-  const privateKey = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey;
+  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Sheets fetch failed: ${res.status}`);
+  const csv = await res.text();
 
-  if (!clientEmail || !privateKey) {
-    console.warn('[Roster] Google credentials not configured');
-    return [];
-  }
-
-  const auth = new google.auth.GoogleAuth({
-    credentials: { client_email: clientEmail, private_key: privateKey },
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-  });
-
-  const sheets = google.sheets({ version: 'v4', auth });
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A:V`,
-  });
-
-  const rows = response.data.values || [];
+  const rows = parseCSV(csv);
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map((h: string) => h.trim());
+  const headers = rows[0].map(h => h.trim());
   const col = (name: string) => headers.indexOf(name);
 
   const docCol = col('Documento');
@@ -88,13 +95,13 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
   const mesaCol = col('MESA_');
   const clientCol = col('Client');
 
-  console.log('[Roster] Headers found:', headers);
+  console.log('[Roster] Headers:', headers);
   console.log('[Roster] Col indices:', { docCol, nombreCol, nivelCol, mesaCol, clientCol });
 
   const users: RosterUser[] = rows
     .slice(1)
-    .filter((row: string[]) => row[docCol]?.trim() && row[nivelCol]?.trim())
-    .map((row: string[]) => {
+    .filter(row => row[docCol]?.trim() && row[nivelCol]?.trim())
+    .map(row => {
       const rfc = row[docCol]?.trim().toUpperCase();
       const nombre = row[nombreCol]?.trim() || '';
       const nivel = row[nivelCol]?.trim() || '';
@@ -140,9 +147,9 @@ app.get('/api/roster', async (_req, res) => {
   try {
     const users = await getRoster();
     res.json(users);
-  } catch (error) {
-    console.error('[Roster] Error:', error);
-    res.status(500).json({ error: 'Failed to fetch roster' });
+  } catch (error: any) {
+    console.error('[Roster] Error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch roster', detail: error?.message });
   }
 });
 
@@ -154,9 +161,9 @@ app.post('/api/login', async (req, res) => {
     const user = users.find(u => u.rfc === rfc.toUpperCase().trim());
     if (user) res.json(user);
     else res.status(404).json({ error: 'RFC not found' });
-  } catch (error) {
-    console.error('[Login] Error:', error);
-    res.status(500).json({ error: 'Login failed' });
+  } catch (error: any) {
+    console.error('[Login] Error:', error?.message);
+    res.status(500).json({ error: 'Login failed', detail: error?.message });
   }
 });
 
