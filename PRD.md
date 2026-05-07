@@ -128,10 +128,9 @@ La pestaña **Financial** es exclusiva del Executive y solo es accesible cuando 
 - Pestaña Financial: KPIs financieros por cliente y department (`FinancialView`).
 - Vista propia global (`ExecutiveView`): KPIs macro (Core Clients, Service Desks, Growth QoQ, Revenue Projection), gráfico de distribución por cliente, índice de performance financiero. **Pendiente de activar en el routing de Dashboard.**
 
-### PM *(Pepsico exclusivo — pendiente de definir)*
-- Rol de gestión de proyectos dentro de Pepsico.
-- No supervisa agentes ni tiene acceso a datos de Stellantis.
-- Vistas, pestañas y métricas por definir en una fase posterior.
+### PM *(Pepsico exclusivo)*
+
+Ver sección **10. Pepsico — Rol PM** para la definición completa.
 
 ---
 
@@ -196,7 +195,8 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 |------|-------------|
 | Google Sheets — integración en tiempo real | Sincronización automática del Roster desde Google Sheets |
 | `ExecutiveView` activa | Conectar `ExecutiveView.tsx` al routing de `Dashboard.tsx` |
-| Rol PM | Definir vistas, métricas y acceso para el rol PM de Pepsico |
+| Vistas PM de Pepsico | Implementar Gantt jerárquico, métricas y drill-down Manager→PM |
+| Fuente de datos campañas Pepsico | Definir e integrar la fuente de datos de campañas (fases, tasks, fechas) |
 | Vistas operativas de Pepsico | Datos operativos del equipo Pepsico más allá del Financial |
 | Control de acceso backend | Validación de rol/cliente en endpoints de la API |
 
@@ -214,5 +214,93 @@ Este PRD cubre:
 No cubre:
 - Lógica de cálculo de KPIs individuales
 - Diseño visual específico de componentes
-- Vistas y métricas del rol PM (se definirán en una fase posterior)
-- Vistas operativas del cliente Pepsico (se definirán en una fase posterior)
+- Métricas detalladas del rol PM (% cumplimiento, estados de fase — por definir)
+- Fuente de datos de campañas Pepsico (por definir)
+- Vistas operativas del cliente Pepsico más allá del Financial y PM
+
+---
+
+## 10. Pepsico — Rol PM: Gestión de Campañas Publicitarias
+
+### Descripción del rol
+
+Los PM (Project Managers) de Pepsico gestionan campañas publicitarias por marca. Su vista en el dashboard refleja su rendimiento individual sobre el portafolio de campañas que tienen asignadas. No supervisan agentes ni tienen acceso a datos de Stellantis.
+
+### Categorías y Brands
+
+Las campañas se organizan en dos categorías. Cada campaña pertenece a una Brand dentro de su categoría:
+
+**Biscuit**
+CHOKIS, CLASICA GAMESA, CRACKETS, EMPERADOR, GAMESA, GIRO, HABANERAS, MARIAS, MULTIMARCA/PROMO, QUAKER, SALADITAS, SONRICS, EQUITY
+
+**Savory**
+CHEETOS, DORITOS, FLAMINHOT, INNOVACIÓN, JOY, KACANG, MAFER, MIXES, MULTIMARCA/PROMOS, PAKETAXO, PAPAS SABRITAS, RUFFLES, TOSTITOS, SABRITAS, AFFORDABLE
+
+### Nomenclatura de campañas
+
+Las campañas siguen la convención:
+`Brand_NombreCampaña_Año_FechaInicio_FechaFin_Categoría_Sufijo`
+
+Ejemplos:
+- `Chokis_Switch_25_Oct16_Dic10_B_PMF`
+- `Doritos_Dinamita_25_Sep08_Oct24_S_PMF`
+- `Emperador_Rafiki_26_Oct10_Jul31_B_PMF`
+
+### Fases de campaña
+
+Todas las campañas siguen el mismo ciclo de 8 fases secuenciales:
+
+| # | Fase |
+|---|------|
+| 01 | Brief |
+| 02 | Big Idea |
+| 03 | Media Plan |
+| 04 | Content Grid |
+| 05 | Content Production |
+| 06 | Go Live |
+| 07 | Final Report |
+| 08 | Closing Campaign |
+
+Cada fase puede contener **Tasks** (subtareas). Las Tasks son el nivel más granular de la jerarquía pero no se representan en el Gantt.
+
+### Visualización — Gráfico de Gantt jerárquico
+
+El Gantt funciona como una matriz expandible (similar a Power BI), con 4 niveles de jerarquía:
+
+| Nivel | Filas | Barra en Gantt |
+|-------|-------|----------------|
+| **Brand** | Una fila por Brand | No muestra barra |
+| **Campaña** | Una fila por nombre de campaña | Barra única de inicio a fin de la campaña completa |
+| **Fase** | Una fila por fase (01–08) | Barra por duración de cada fase |
+| **Task** | Una fila por tarea | No muestra barra en el Gantt |
+
+Comportamiento de expansión:
+- Contraído a **Brand**: se listan las Brands sin visualización de tiempo
+- Expandido a **Campaña**: se muestra una barra por campaña (duración total)
+- Expandido a **Fase**: se despliegan las 8 fases con su duración individual en el Gantt
+- Expandido a **Task**: se listan las tareas de cada fase sin representación gráfica
+
+### Métricas del dashboard PM
+
+| Métrica | Estado |
+|---------|--------|
+| Cantidad de campañas por fase | Por implementar |
+| % Cumplimiento de tiempos | Por definir — valor default en la implementación inicial |
+| Estado por fase (Pendiente / En progreso / Completada / Retrasada) | Por definir — valor default en la implementación inicial |
+| Otras métricas operativas | Por definir en fase posterior |
+
+### Vista Manager (equipo Pepsico)
+
+- Rendimiento general del equipo de PMs
+- Drill-down a la vista individual de cada PM (mismo mecanismo que en Stellantis: dropdown en Sidebar)
+
+### Fuente de datos
+
+Los datos de campañas (nombres, fechas, fases, tasks, estados) provienen de una fuente externa aún por definir, separada del Roster de Google Sheets.
+
+### Jerarquía de acceso Pepsico
+
+| Rol | Alcance |
+|-----|---------|
+| PM | Ve únicamente sus propias campañas y métricas |
+| Manager | Ve el rendimiento general del equipo y puede navegar a la vista individual de cada PM |
