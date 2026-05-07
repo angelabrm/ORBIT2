@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -18,12 +18,8 @@ import { IconButton, Tooltip as MuiTooltip } from '@mui/material';
 import {
   Activity,
   Trophy,
-  Target,
-  CheckCircle2,
-  AlertCircle,
   Info,
   Calendar as CalendarIcon,
-  Layers,
 } from 'lucide-react';
 import {
   LineChart,
@@ -41,6 +37,11 @@ import {
   Bar,
   LabelList,
 } from 'recharts';
+import dayjs from 'dayjs';
+import weekOfYear from 'dayjs/plugin/weekOfYear';
+import { useAuth } from '../../context/AuthContext';
+
+dayjs.extend(weekOfYear);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -225,7 +226,9 @@ const ManagementIndicator: React.FC<IndicatorProps> = ({
           color: color,
           fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit',
           textShadow: isDark ? `0 0 20px ${color}33` : 'none',
-          fontSize: '3rem',
+          fontSize: '2.5rem',
+          whiteSpace: 'nowrap',
+          lineHeight: 1.1,
         }}
       >
         {value}
@@ -311,37 +314,24 @@ const MOCK_CAMPAIGNS: Campaign[] = [
   },
 ];
 
-const TREND_DATA_BY_MONTH = [
-  { name: 'Jan', fullDate: '2025-01-15', 'On-Time Rate': 85, 'Campaign Count': 2, 'Completion Rate': 60 },
-  { name: 'Feb', fullDate: '2025-02-15', 'On-Time Rate': 78, 'Campaign Count': 3, 'Completion Rate': 55 },
-  { name: 'Mar', fullDate: '2025-03-15', 'On-Time Rate': 90, 'Campaign Count': 2, 'Completion Rate': 80 },
-  { name: 'Apr', fullDate: '2025-04-15', 'On-Time Rate': 88, 'Campaign Count': 4, 'Completion Rate': 75 },
-  { name: 'May', fullDate: '2025-05-15', 'On-Time Rate': 92, 'Campaign Count': 3, 'Completion Rate': 85 },
-  { name: 'Jun', fullDate: '2025-06-15', 'On-Time Rate': 75, 'Campaign Count': 2, 'Completion Rate': 50 },
-  { name: 'Jul', fullDate: '2025-07-15', 'On-Time Rate': 83, 'Campaign Count': 3, 'Completion Rate': 70 },
-];
-
-const TREND_DATA_BY_WEEK = [
-  { name: 'W18', fullDate: '2025-05-05', 'On-Time Rate': 90, 'Campaign Count': 1, 'Completion Rate': 80 },
-  { name: 'W19', fullDate: '2025-05-12', 'On-Time Rate': 85, 'Campaign Count': 2, 'Completion Rate': 75 },
-  { name: 'W20', fullDate: '2025-05-19', 'On-Time Rate': 92, 'Campaign Count': 2, 'Completion Rate': 88 },
-  { name: 'W21', fullDate: '2025-05-26', 'On-Time Rate': 78, 'Campaign Count': 1, 'Completion Rate': 65 },
-  { name: 'W22', fullDate: '2025-06-02', 'On-Time Rate': 95, 'Campaign Count': 3, 'Completion Rate': 90 },
-];
-
-const TREND_DATA_BY_QUARTER = [
-  { name: 'Q1 25', fullDate: '2025-01-01', 'On-Time Rate': 84, 'Campaign Count': 7, 'Completion Rate': 65 },
-  { name: 'Q2 25', fullDate: '2025-04-01', 'On-Time Rate': 88, 'Campaign Count': 9, 'Completion Rate': 72 },
-  { name: 'Q3 25', fullDate: '2025-07-01', 'On-Time Rate': 91, 'Campaign Count': 8, 'Completion Rate': 80 },
-  { name: 'Q4 25', fullDate: '2025-10-01', 'On-Time Rate': 79, 'Campaign Count': 10, 'Completion Rate': 60 },
-];
-
 const PHASE_COLORS: Record<PhaseStatus, string> = {
   Completed: '#22c55e',
   'In Progress': '#0ba0af',
   Pending: '#94a3b8',
   Delayed: '#ef4444',
 };
+
+// 8 sequential campaign phases — colors graduate from teal → magenta
+const PHASE_DEFS: { number: number; name: string; color: string }[] = [
+  { number: 1, name: 'Brief',              color: '#0ba0af' },
+  { number: 2, name: 'Big Idea',           color: '#33b6c4' },
+  { number: 3, name: 'Media Plan',         color: '#5cccd9' },
+  { number: 4, name: 'Content Grid',       color: '#b9e04d' },
+  { number: 5, name: 'Content Production', color: '#ffcc00' },
+  { number: 6, name: 'Go Live',            color: '#ff9900' },
+  { number: 7, name: 'Final Report',       color: '#ea5713' },
+  { number: 8, name: 'Closing Campaign',   color: '#B018D9' },
+];
 
 // ─── Gantt helpers ────────────────────────────────────────────────────────────
 
@@ -544,20 +534,64 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
 // ─── Main PMView ──────────────────────────────────────────────────────────────
 
 const INDICATOR_OPTIONS = ['On-Time Rate', 'Campaign Count', 'Completion Rate'];
-const INDICATOR_COLORS: Record<string, string> = {
-  'On-Time Rate': '#0ba0af',
-  'Campaign Count': '#B018D9',
-  'Completion Rate': '#b9e04d',
-};
 
-type HierarchyKey = 'month' | 'week' | 'quarter';
-const HIERARCHY_DATA: Record<HierarchyKey, typeof TREND_DATA_BY_MONTH> = {
-  month: TREND_DATA_BY_MONTH,
-  week: TREND_DATA_BY_WEEK,
-  quarter: TREND_DATA_BY_QUARTER,
+type HierarchyKey = 'day' | 'week' | 'month' | 'quarter' | 'year';
+const HIERARCHY_LABELS: Record<HierarchyKey, string> = {
+  day: 'DAYS',
+  week: 'WEEKS',
+  month: 'MONTHS',
+  quarter: 'QUARTERS',
+  year: 'YEARS',
 };
 
 const CATEGORY_OPTIONS = ['All', 'Biscuit', 'Savory'];
+
+function buildTrendData(start: dayjs.Dayjs, end: dayjs.Dayjs, hierarchy: HierarchyKey) {
+  const data: { name: string; fullDate: string; 'On-Time Rate': number; 'Campaign Count': number; 'Completion Rate': number }[] = [];
+
+  let cur: dayjs.Dayjs;
+  if (hierarchy === 'day') cur = start.startOf('day');
+  else if (hierarchy === 'week') cur = start.startOf('week');
+  else if (hierarchy === 'month') cur = start.startOf('month');
+  else if (hierarchy === 'quarter') cur = start.startOf('month').subtract(start.month() % 3, 'month');
+  else cur = start.startOf('year');
+
+  let safety = 0;
+  while ((cur.isBefore(end) || cur.isSame(end, hierarchy === 'quarter' ? 'month' : hierarchy)) && safety < 400) {
+    safety++;
+    const seed = cur.unix();
+    const r = (off: number) => {
+      const x = Math.sin(seed + off) * 10000;
+      return x - Math.floor(x);
+    };
+    const onTime = 65 + Math.floor(r(1) * 35);
+    const completion = 45 + Math.floor(r(2) * 50);
+    const count = 1 + Math.floor(r(3) * 5);
+
+    let name = '';
+    if (hierarchy === 'day') name = cur.format('MMM DD');
+    else if (hierarchy === 'week') name = `W${cur.week()}`;
+    else if (hierarchy === 'month') name = cur.format('MMM YY');
+    else if (hierarchy === 'quarter') name = `Q${Math.floor(cur.month() / 3) + 1} ${cur.format('YY')}`;
+    else name = cur.format('YYYY');
+
+    data.push({
+      name,
+      fullDate: cur.toISOString(),
+      'On-Time Rate': onTime,
+      'Campaign Count': count,
+      'Completion Rate': completion,
+    });
+
+    if (hierarchy === 'day') cur = cur.add(1, 'day');
+    else if (hierarchy === 'week') cur = cur.add(1, 'week');
+    else if (hierarchy === 'month') cur = cur.add(1, 'month');
+    else if (hierarchy === 'quarter') cur = cur.add(3, 'month');
+    else cur = cur.add(1, 'year');
+  }
+
+  return data;
+}
 
 const getOnTimeColor = (val: number) => {
   if (val >= 85) return '#b9e04d';
@@ -573,6 +607,7 @@ const getRankingColor = (rank: number) => {
 const PMView: React.FC = () => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const { startDate, endDate } = useAuth();
 
   const [hierarchy, setHierarchy] = useState<HierarchyKey>('month');
   const [hierarchyAnchor, setHierarchyAnchor] = useState<null | HTMLElement>(null);
@@ -583,26 +618,33 @@ const PMView: React.FC = () => {
   const allBrands = Array.from(new Set(MOCK_CAMPAIGNS.map(c => c.brand)));
 
   const totalCampaigns = MOCK_CAMPAIGNS.length;
-  const activeCampaigns = MOCK_CAMPAIGNS.filter(c => c.phases.some(p => p.status === 'In Progress')).length;
   const delayedCampaigns = MOCK_CAMPAIGNS.filter(c => c.phases.some(p => p.status === 'Delayed')).length;
-  const completedCampaigns = MOCK_CAMPAIGNS.filter(c => c.phases.every(p => p.status === 'Completed')).length;
   const onTimeRate = Math.round(((totalCampaigns - delayedCampaigns) / totalCampaigns) * 100);
-  const completionRate = Math.round((completedCampaigns / totalCampaigns) * 100);
   const rankingPercentile = 18;
   const myQuartile = 'Q1';
 
-  const phaseStatusCounts = (['Completed', 'In Progress', 'Pending', 'Delayed'] as PhaseStatus[]).map(status => ({
-    name: status,
-    value: MOCK_CAMPAIGNS.flatMap(c => c.phases).filter(p => p.status === status).length,
-    color: PHASE_COLORS[status],
-  }));
+  // Pie: count campaigns by their CURRENT phase (first non-completed phase, or Closing if all done)
+  const campaignsByPhase = PHASE_DEFS.map(def => {
+    const count = MOCK_CAMPAIGNS.filter(c => {
+      const currentPhase = c.phases.find(p => p.status !== 'Completed') || c.phases[c.phases.length - 1];
+      return currentPhase.number === def.number;
+    }).length;
+    return {
+      name: `${String(def.number).padStart(2, '0')} ${def.name}`,
+      value: count,
+      color: def.color,
+    };
+  });
 
   const campaignsByBrand = allBrands.map(brand => ({
     brand,
     count: MOCK_CAMPAIGNS.filter(c => c.brand === brand).length,
   }));
 
-  const trendData = HIERARCHY_DATA[hierarchy];
+  const trendData = useMemo(
+    () => buildTrendData(startDate, endDate, hierarchy),
+    [startDate, endDate, hierarchy]
+  );
 
   const handleIndicatorChange = (event: any) => {
     const value = event.target.value;
@@ -638,8 +680,8 @@ const PMView: React.FC = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 2, overflow: 'hidden' }}>
 
-      {/* ── Level 1: My Performance + My Ranking (20%) ───────────────────────── */}
-      <Box sx={{ height: '20%', display: 'flex', gap: 2, flexShrink: 0 }}>
+      {/* ── Level 1: My Performance + My Ranking (24%) ───────────────────────── */}
+      <Box sx={{ height: '24%', display: 'flex', gap: 2, flexShrink: 0 }}>
         <Box sx={{ flex: 1 }}>
           <ManagementIndicator
             title="My Performance"
@@ -711,7 +753,7 @@ const PMView: React.FC = () => {
                 startIcon={<CalendarIcon size={13} />}
                 sx={{ fontSize: 11, fontWeight: 800, color: 'primary.main', borderColor: 'rgba(11, 160, 175, 0.3)', height: 30, px: 1.5, bgcolor: isDark ? 'rgba(11, 160, 175, 0.05)' : 'transparent', '&:hover': { borderColor: 'primary.main', bgcolor: 'rgba(11, 160, 175, 0.1)' } }}
               >
-                {hierarchy.toUpperCase()}S
+                {HIERARCHY_LABELS[hierarchy]}
               </Button>
               <Menu
                 anchorEl={hierarchyAnchor}
@@ -719,9 +761,11 @@ const PMView: React.FC = () => {
                 onClose={() => setHierarchyAnchor(null)}
                 slotProps={{ paper: { sx: { bgcolor: isDark ? '#000A1A' : '#fff', border: '1px solid rgba(11, 160, 175, 0.3)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', '& .MuiMenuItem-root': { fontSize: 12, fontWeight: 700, py: 1, '&:hover': { bgcolor: 'rgba(11, 160, 175, 0.1)' } } } } }}
               >
-                <MenuItem onClick={() => { setHierarchy('month'); setHierarchyAnchor(null); }}>MONTHS</MenuItem>
+                <MenuItem onClick={() => { setHierarchy('day'); setHierarchyAnchor(null); }}>DAYS</MenuItem>
                 <MenuItem onClick={() => { setHierarchy('week'); setHierarchyAnchor(null); }}>WEEKS</MenuItem>
+                <MenuItem onClick={() => { setHierarchy('month'); setHierarchyAnchor(null); }}>MONTHS</MenuItem>
                 <MenuItem onClick={() => { setHierarchy('quarter'); setHierarchyAnchor(null); }}>QUARTERS</MenuItem>
+                <MenuItem onClick={() => { setHierarchy('year'); setHierarchyAnchor(null); }}>YEARS</MenuItem>
               </Menu>
             </Box>
           </Box>
@@ -768,46 +812,70 @@ const PMView: React.FC = () => {
           }}
         >
           <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 0.5, display: 'block' }}>
-            Phase Status Distribution
+            Campaign Distribution by Status
           </Typography>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={phaseStatusCounts} cx="50%" cy="48%" innerRadius="28%" outerRadius="60%" dataKey="value" nameKey="name" paddingAngle={2}>
-                {phaseStatusCounts.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              <Pie data={campaignsByPhase} cx="50%" cy="48%" innerRadius={0} outerRadius="68%" dataKey="value" nameKey="name" paddingAngle={1}>
+                {campaignsByPhase.map((entry, i) => <Cell key={i} fill={entry.color} />)}
               </Pie>
               <Tooltip contentStyle={barTooltipStyle.contentStyle} itemStyle={barTooltipStyle.itemStyle} labelStyle={barTooltipStyle.labelStyle} />
-              <Legend wrapperStyle={{ fontSize: 12, fontWeight: 700 }} iconType="circle" iconSize={10} />
+              <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} iconType="circle" iconSize={9} />
             </PieChart>
           </ResponsiveContainer>
         </Paper>
 
       </Box>
 
-      {/* ── Level 3: Bar chart (50%) | Gantt (50%) (remaining) ──────────────── */}
-      <Box sx={{ flex: 1, display: 'flex', gap: 2, minHeight: 0 }}>
+      {/* ── Level 3: Gantt (50%) | Bar chart (50%) (remaining) ──────────────── */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0 }}>
 
-        {/* Bar chart + filter strip stacked on the left */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0 }}>
-          {/* Filter strip */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography sx={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.5 }}>Total:</Typography>
-              <Typography sx={{ fontSize: 13, fontWeight: 900, color: theme.palette.primary.main, fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit' }}>{totalCampaigns} campaigns</Typography>
-            </Box>
-            <FormControl size="small">
-              <Select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
-                <MenuItem value="All" sx={{ fontSize: 12 }}>All Brands</MenuItem>
-                {allBrands.map(b => <MenuItem key={b} value={b} sx={{ fontSize: 12 }}>{b}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <FormControl size="small">
-              <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
-                {CATEGORY_OPTIONS.map(c => <MenuItem key={c} value={c} sx={{ fontSize: 12 }}>{c === 'All' ? 'All Categories' : c}</MenuItem>)}
-              </Select>
-            </FormControl>
+        {/* Filter strip — full width above both panels */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.5 }}>Total:</Typography>
+            <Typography sx={{ fontSize: 13, fontWeight: 900, color: theme.palette.primary.main, fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit' }}>{totalCampaigns} campaigns</Typography>
           </Box>
+          <FormControl size="small">
+            <Select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
+              <MenuItem value="All" sx={{ fontSize: 12 }}>All Brands</MenuItem>
+              {allBrands.map(b => <MenuItem key={b} value={b} sx={{ fontSize: 12 }}>{b}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small">
+            <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
+              {CATEGORY_OPTIONS.map(c => <MenuItem key={c} value={c} sx={{ fontSize: 12 }}>{c === 'All' ? 'All Categories' : c}</MenuItem>)}
+            </Select>
+          </FormControl>
+        </Box>
 
-          {/* Bar chart */}
+        {/* Gantt + Bar — equal heights, side by side */}
+        <Box sx={{ flex: 1, display: 'flex', gap: 2, minHeight: 0 }}>
+
+          {/* Gantt — left 50% */}
+          <Paper
+            elevation={0}
+            sx={{
+              flex: 1,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+              bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
+              border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
+            }}
+          >
+            <Box sx={{ px: 2, pt: 1.5, pb: 0.5, flexShrink: 0, borderBottom: `1px solid ${theme.palette.divider}` }}>
+              <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800 }}>
+                Campaign Gantt
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, minHeight: 0 }}>
+              <GanttChart campaigns={MOCK_CAMPAIGNS} brandFilter={brandFilter} categoryFilter={categoryFilter} />
+            </Box>
+          </Paper>
+
+          {/* Bar chart — right 50% */}
           <Paper
             elevation={0}
             sx={{
@@ -833,30 +901,8 @@ const PMView: React.FC = () => {
               </BarChart>
             </ResponsiveContainer>
           </Paper>
-        </Box>
 
-        {/* Gantt */}
-        <Paper
-          elevation={0}
-          sx={{
-            flex: 1,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 0,
-            bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
-            border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
-          }}
-        >
-          <Box sx={{ px: 2, pt: 1.5, pb: 0.5, flexShrink: 0, borderBottom: `1px solid ${theme.palette.divider}` }}>
-            <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800 }}>
-              Campaign Gantt
-            </Typography>
-          </Box>
-          <Box sx={{ flex: 1, minHeight: 0 }}>
-            <GanttChart campaigns={MOCK_CAMPAIGNS} brandFilter={brandFilter} categoryFilter={categoryFilter} />
-          </Box>
-        </Paper>
+        </Box>
 
       </Box>
 
