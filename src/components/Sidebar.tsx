@@ -43,15 +43,16 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
   const theme = useTheme();
   const { user, users, logout, selectedMember, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
 
+  const isPM = user?.role === 'PM';
   const isLeader = user?.role === 'Leader';
   const isManager = user?.role === 'Manager' || user?.role === 'Executive';
-  const canSeeAgentDropdown = isLeader || isManager;
+  const canSeeAgentDropdown = !isPM && (isLeader || isManager);
   const { managementTab, setManagementTab } = useAuth();
 
-  const showManagementTabs = user && (
-    ["Leader", "Manager", "Executive"].includes(user.role) || 
-    user.serviceDesk === 'CAC' || 
-    user.serviceDesk === 'Fleet' || 
+  const showManagementTabs = !isPM && user && (
+    ["Leader", "Manager", "Executive"].includes(user.role) ||
+    user.serviceDesk === 'CAC' ||
+    user.serviceDesk === 'Fleet' ||
     user.serviceDesk === 'Premium'
   );
 

@@ -7,6 +7,7 @@ import Header from './Header';
 import AgentView from './Views/AgentView';
 import ProjectManagerView from './Views/ProjectManagerView';
 import FinancialView from './Views/FinancialView';
+import PMView from './Views/PMView';
 import { useAuth } from '../context/AuthContext';
 import { Role } from '../data/mockData';
 
@@ -33,7 +34,8 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
         return <ProjectManagerView member={member} />;
       case 'Leader':
         return <AgentView member={member} />;
-      case 'Staff':
+      case 'PM':
+        return <PMView />;
       default:
         return <AgentView member={member} />;
     }
