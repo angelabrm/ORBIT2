@@ -379,7 +379,7 @@ function monthLabels(rangeMin: number, rangeMax: number) {
 
 // ─── Gantt component ──────────────────────────────────────────────────────────
 
-const ROW_HEIGHT = 30;
+const ROW_HEIGHT = 34;
 
 interface GanttProps {
   campaigns: Campaign[];
@@ -434,7 +434,7 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
         onClick={() => toggleBrand(brand)}
       >
         <Box sx={{ width: '32%', minWidth: 160, flexShrink: 0, px: 1.5, display: 'flex', alignItems: 'center', gap: 0.5, borderRight: `1px solid ${theme.palette.divider}` }}>
-          <Typography sx={{ fontSize: 11, fontWeight: 800, color: theme.palette.primary.main, userSelect: 'none', letterSpacing: 0.5 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 800, color: theme.palette.primary.main, userSelect: 'none', letterSpacing: 0.5 }}>
             {isExpandedBrand ? '▼' : '▶'} {brand}
           </Typography>
         </Box>
@@ -456,7 +456,7 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
           onClick={() => toggleCampaign(campaign.id)}
         >
           <Box sx={{ width: '32%', minWidth: 160, flexShrink: 0, pl: 2.5, pr: 1, display: 'flex', alignItems: 'center', gap: 0.5, borderRight: `1px solid ${theme.palette.divider}` }}>
-            <Typography sx={{ fontSize: 10, fontWeight: 600, userSelect: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Typography sx={{ fontSize: 12, fontWeight: 600, userSelect: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {isExpandedCampaign ? '▼' : '▶'} {campaign.name.split('_').slice(0, 2).join(' ')}
             </Typography>
           </Box>
@@ -481,11 +481,11 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
             onClick={() => togglePhase(phase.id)}
           >
             <Box sx={{ width: '32%', minWidth: 160, flexShrink: 0, pl: 4, pr: 1, display: 'flex', alignItems: 'center', gap: 0.5, borderRight: `1px solid ${theme.palette.divider}` }}>
-              <Typography sx={{ fontSize: 9, opacity: 0.7, userSelect: 'none', flexShrink: 0 }}>
+              <Typography sx={{ fontSize: 11, opacity: 0.8, userSelect: 'none', flexShrink: 0 }}>
                 {isExpandedPhase ? '▼' : '▶'} {String(phase.number).padStart(2, '0')} — {phase.name}
               </Typography>
-              <Box sx={{ ml: 0.5, px: 0.5, py: 0.1, borderRadius: 0.4, bgcolor: phaseColor + '22', border: `1px solid ${phaseColor}66`, flexShrink: 0 }}>
-                <Typography sx={{ fontSize: 7, color: phaseColor, fontWeight: 700 }}>{phase.status}</Typography>
+              <Box sx={{ ml: 0.5, px: 0.6, py: 0.2, borderRadius: 0.4, bgcolor: phaseColor + '22', border: `1px solid ${phaseColor}66`, flexShrink: 0 }}>
+                <Typography sx={{ fontSize: 9, color: phaseColor, fontWeight: 700 }}>{phase.status}</Typography>
               </Box>
             </Box>
             <Box sx={{ flex: 1, position: 'relative', height: '100%' }}>
@@ -501,7 +501,7 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
           rows.push(
             <Box key={`task-${task.id}`} sx={{ display: 'flex', height: ROW_HEIGHT, alignItems: 'center', bgcolor: rowBg(tri) }}>
               <Box sx={{ width: '32%', minWidth: 160, flexShrink: 0, pl: 5.5, pr: 1, display: 'flex', alignItems: 'center', gap: 0.5, borderRight: `1px solid ${theme.palette.divider}` }}>
-                <Typography sx={{ fontSize: 9, opacity: 0.45, userSelect: 'none' }}>• {task.name}</Typography>
+                <Typography sx={{ fontSize: 11, opacity: 0.6, userSelect: 'none' }}>• {task.name}</Typography>
               </Box>
               <Box sx={{ flex: 1, position: 'relative', height: '100%' }} />
             </Box>
@@ -514,9 +514,9 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', height: 26, borderBottom: `1px solid ${theme.palette.divider}`, flexShrink: 0, bgcolor: isDark ? 'rgba(11,160,175,0.06)' : 'rgba(11,160,175,0.04)' }}>
+      <Box sx={{ display: 'flex', height: 30, borderBottom: `1px solid ${theme.palette.divider}`, flexShrink: 0, bgcolor: isDark ? 'rgba(11,160,175,0.06)' : 'rgba(11,160,175,0.04)' }}>
         <Box sx={{ width: '32%', minWidth: 160, flexShrink: 0, px: 1.5, display: 'flex', alignItems: 'center', borderRight: `1px solid ${theme.palette.divider}` }}>
-          <Typography sx={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: theme.palette.primary.main, opacity: 0.7 }}>
+          <Typography sx={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: theme.palette.primary.main, opacity: 0.85 }}>
             Campaign / Phase
           </Typography>
         </Box>
@@ -524,7 +524,7 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
           {months.map((m, i) => (
             <Box key={i} sx={{ position: 'absolute', left: m.left, top: 0, bottom: 0, display: 'flex', alignItems: 'center' }}>
               <Box sx={{ width: 1, height: '100%', bgcolor: theme.palette.divider, opacity: 0.4 }} />
-              <Typography sx={{ fontSize: 9, opacity: 0.5, ml: 0.3, whiteSpace: 'nowrap', fontWeight: 700 }}>{m.label}</Typography>
+              <Typography sx={{ fontSize: 11, opacity: 0.7, ml: 0.4, whiteSpace: 'nowrap', fontWeight: 700 }}>{m.label}</Typography>
             </Box>
           ))}
         </Box>
@@ -638,94 +638,60 @@ const PMView: React.FC = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 2, overflow: 'hidden' }}>
 
-      {/* ── Level 1: KPI Indicators (22%) ─────────────────────────────────── */}
-      <Box sx={{ height: '22%', display: 'flex', gap: 2, flexShrink: 0 }}>
-
-        {/* My Performance — 4 ManagementIndicator cards */}
-        <Box sx={{ flex: 1, display: 'flex', gap: 2 }}>
-          <Box sx={{ flex: 1 }}>
-            <ManagementIndicator
-              title="My Performance"
-              value={`${onTimeRate}%`}
-              icon={<Activity size={24} />}
-              formula="(Campaigns without delayed phases / Total campaigns) × 100"
-              color={getOnTimeColor(onTimeRate)}
-              description="Your overall on-time delivery rate across all assigned campaigns. 100% means every campaign phase was completed on schedule."
-            />
-          </Box>
-          <Box sx={{ flex: 1 }}>
-            <ManagementIndicator
-              title="Completion Rate"
-              value={`${completionRate}%`}
-              icon={<CheckCircle2 size={24} />}
-              formula="(Fully completed campaigns / Total campaigns) × 100"
-              color={getOnTimeColor(completionRate)}
-              description="Percentage of campaigns where all 8 phases have been marked as Completed."
-            />
-          </Box>
-          <Box sx={{ flex: 1 }}>
-            <ManagementIndicator
-              title="Active Campaigns"
-              value={`${activeCampaigns}`}
-              icon={<Layers size={24} />}
-              formula="Count of campaigns with at least one phase In Progress"
-              color={theme.palette.primary.main}
-              description="Number of campaigns currently in execution — at least one phase is actively In Progress."
-            />
-          </Box>
-          <Box sx={{ flex: 1 }}>
-            <ManagementIndicator
-              title="Delayed"
-              value={`${delayedCampaigns}`}
-              icon={<AlertCircle size={24} />}
-              formula="Count of campaigns with at least one phase marked as Delayed"
-              color={delayedCampaigns > 0 ? '#ea5713' : '#b9e04d'}
-              description="Campaigns where at least one phase is behind schedule. Requires immediate attention."
-            />
-          </Box>
+      {/* ── Level 1: My Performance + My Ranking (20%) ───────────────────────── */}
+      <Box sx={{ height: '20%', display: 'flex', gap: 2, flexShrink: 0 }}>
+        <Box sx={{ flex: 1 }}>
+          <ManagementIndicator
+            title="My Performance"
+            value={`${onTimeRate}%`}
+            icon={<Activity size={24} />}
+            formula="(Campaigns without delayed phases / Total campaigns) × 100"
+            color={getOnTimeColor(onTimeRate)}
+            description="Your overall on-time delivery rate across all assigned campaigns. 100% means every campaign phase was completed on schedule."
+          />
         </Box>
-
-        {/* My Ranking */}
-        <Box sx={{ width: 220, flexShrink: 0 }}>
+        <Box sx={{ flex: 1 }}>
           <ManagementIndicator
             title="My Ranking"
             value={`TOP ${rankingPercentile}%`}
             icon={<Trophy size={24} />}
-            formula="Comparison of your On-Time Rate and Completion Rate against all PMs in the Pepsico team."
+            formula="Comparison of your On-Time Rate against all PMs in the Pepsico team."
             color={getRankingColor(rankingPercentile)}
-            description={`You are in the top ${rankingPercentile}% of the Pepsico PM team. This means your campaign delivery performance exceeds ${100 - rankingPercentile}% of your peers.`}
+            description={`You are in the top ${rankingPercentile}% of the Pepsico PM team. Your campaign delivery performance exceeds ${100 - rankingPercentile}% of your peers.`}
             quartile={myQuartile}
           />
         </Box>
-
       </Box>
 
-      {/* ── Level 2: Trend Line Chart (28%) ────────────────────────────────── */}
-      <Box sx={{ height: '28%', flexShrink: 0 }}>
+      {/* ── Level 2: Line chart (50%) | Pie chart (50%) (30%) ───────────────── */}
+      <Box sx={{ height: '30%', display: 'flex', gap: 2, flexShrink: 0 }}>
+
+        {/* Line chart */}
         <Paper
           elevation={0}
           sx={{
+            flex: 1,
             p: 2,
-            height: '100%',
             display: 'flex',
             flexDirection: 'column',
+            minWidth: 0,
             bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
             border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
           }}
         >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: theme.palette.primary.main, mb: 0.5 }}>
-                {selectedIndicators.length > 0 ? `${selectedIndicators.join(' and ')} Over Time` : 'Campaign Trends'}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: theme.palette.primary.main, whiteSpace: 'nowrap', fontSize: 11 }}>
+                Trends
               </Typography>
-              <FormControl sx={{ minWidth: 280 }} size="small">
+              <FormControl size="small" sx={{ minWidth: 200 }}>
                 <Select
                   multiple
                   value={selectedIndicators}
                   onChange={handleIndicatorChange}
                   input={<OutlinedInput />}
                   renderValue={selected => (selected as string[]).join(', ')}
-                  sx={{ bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white', fontSize: 13 }}
+                  sx={{ bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white', fontSize: 12, height: 30 }}
                 >
                   {INDICATOR_OPTIONS.map(opt => (
                     <MenuItem key={opt} value={opt}>
@@ -736,14 +702,14 @@ const PMView: React.FC = () => {
                 </Select>
               </FormControl>
             </Box>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, opacity: 0.5, fontSize: 10, letterSpacing: 1 }}>TIME_SCALE</Typography>
               <Button
                 size="small"
                 variant="outlined"
                 onClick={e => setHierarchyAnchor(e.currentTarget)}
-                startIcon={<CalendarIcon size={14} />}
-                sx={{ fontSize: 11, fontWeight: 800, color: 'primary.main', borderColor: 'rgba(11, 160, 175, 0.3)', height: 36, px: 2, bgcolor: isDark ? 'rgba(11, 160, 175, 0.05)' : 'transparent', '&:hover': { borderColor: 'primary.main', bgcolor: 'rgba(11, 160, 175, 0.1)' } }}
+                startIcon={<CalendarIcon size={13} />}
+                sx={{ fontSize: 11, fontWeight: 800, color: 'primary.main', borderColor: 'rgba(11, 160, 175, 0.3)', height: 30, px: 1.5, bgcolor: isDark ? 'rgba(11, 160, 175, 0.05)' : 'transparent', '&:hover': { borderColor: 'primary.main', bgcolor: 'rgba(11, 160, 175, 0.1)' } }}
               >
                 {hierarchy.toUpperCase()}S
               </Button>
@@ -762,56 +728,24 @@ const PMView: React.FC = () => {
 
           <Box sx={{ flex: 1, minHeight: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 10 }}>
+              <LineChart data={trendData} margin={{ top: 8, right: 24, left: 0, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
-                <XAxis
-                  dataKey="name"
-                  tick={{ fontSize: 12, fontWeight: 700, fill: '#0ba0af' }}
-                  stroke="rgba(11, 160, 175, 0.4)"
-                  dy={6}
-                />
-                <YAxis
-                  yAxisId="left"
-                  tick={{ fontSize: 12, opacity: 0.9, fontWeight: 800 }}
-                  stroke={theme.palette.primary.main}
-                  width={45}
-                  domain={[0, 'auto']}
-                />
+                <XAxis dataKey="name" tick={{ fontSize: 12, fontWeight: 700, fill: '#0ba0af' }} stroke="rgba(11, 160, 175, 0.4)" dy={4} />
+                <YAxis yAxisId="left" tick={{ fontSize: 12, fontWeight: 800 }} stroke={theme.palette.primary.main} width={40} domain={[0, 'auto']} />
                 {selectedIndicators.length > 1 && (
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    tick={{ fontSize: 12, opacity: 0.9, fontWeight: 800 }}
-                    stroke="#B018D9"
-                    width={45}
-                    domain={[0, 'auto']}
-                  />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12, fontWeight: 800 }} stroke="#B018D9" width={40} domain={[0, 'auto']} />
                 )}
-                <Tooltip
-                  contentStyle={tooltipStyle.contentStyle}
-                  itemStyle={tooltipStyle.itemStyle}
-                  labelStyle={tooltipStyle.labelStyle}
-                />
-                <Legend verticalAlign="bottom" height={28} iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 12, fontWeight: 800 }} />
+                <Tooltip contentStyle={tooltipStyle.contentStyle} itemStyle={tooltipStyle.itemStyle} labelStyle={tooltipStyle.labelStyle} />
+                <Legend verticalAlign="bottom" height={24} iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 12, fontWeight: 800 }} />
                 {selectedIndicators.map((ind, idx) => (
-                  <Line
-                    key={ind}
-                    yAxisId={idx === 0 ? 'left' : 'right'}
-                    type="monotone"
-                    dataKey={ind}
-                    stroke={idx === 0 ? theme.palette.primary.main : '#B018D9'}
-                    strokeWidth={4}
+                  <Line key={ind} yAxisId={idx === 0 ? 'left' : 'right'} type="monotone" dataKey={ind}
+                    stroke={idx === 0 ? theme.palette.primary.main : '#B018D9'} strokeWidth={4}
                     dot={{ r: 5, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
-                    activeDot={{ r: 8, strokeWidth: 0 }}
-                    animationDuration={1200}
+                    activeDot={{ r: 8, strokeWidth: 0 }} animationDuration={1200}
                   >
                     {trendData.length <= 12 && (
-                      <LabelList
-                        dataKey={ind}
-                        position={idx === 0 ? 'top' : 'bottom'}
-                        offset={10}
-                        style={{ fontSize: 11, fontWeight: 800, fill: idx === 0 ? theme.palette.primary.main : '#B018D9' }}
-                      />
+                      <LabelList dataKey={ind} position={idx === 0 ? 'top' : 'bottom'} offset={8}
+                        style={{ fontSize: 11, fontWeight: 800, fill: idx === 0 ? theme.palette.primary.main : '#B018D9' }} />
                     )}
                   </Line>
                 ))}
@@ -819,142 +753,111 @@ const PMView: React.FC = () => {
             </ResponsiveContainer>
           </Box>
         </Paper>
+
+        {/* Pie chart */}
+        <Paper
+          elevation={0}
+          sx={{
+            flex: 1,
+            p: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
+            border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
+          }}
+        >
+          <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 0.5, display: 'block' }}>
+            Phase Status Distribution
+          </Typography>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={phaseStatusCounts} cx="50%" cy="48%" innerRadius="28%" outerRadius="60%" dataKey="value" nameKey="name" paddingAngle={2}>
+                {phaseStatusCounts.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              </Pie>
+              <Tooltip contentStyle={barTooltipStyle.contentStyle} itemStyle={barTooltipStyle.itemStyle} labelStyle={barTooltipStyle.labelStyle} />
+              <Legend wrapperStyle={{ fontSize: 12, fontWeight: 700 }} iconType="circle" iconSize={10} />
+            </PieChart>
+          </ResponsiveContainer>
+        </Paper>
+
       </Box>
 
-      {/* ── Level 3: Gantt + Charts (remaining) ────────────────────────────── */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minHeight: 0 }}>
+      {/* ── Level 3: Bar chart (50%) | Gantt (50%) (remaining) ──────────────── */}
+      <Box sx={{ flex: 1, display: 'flex', gap: 2, minHeight: 0 }}>
 
-        {/* Filter strip */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography sx={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.5 }}>Total:</Typography>
-            <Typography sx={{ fontSize: 13, fontWeight: 900, color: theme.palette.primary.main, fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit' }}>{totalCampaigns} campaigns</Typography>
+        {/* Bar chart + filter strip stacked on the left */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0 }}>
+          {/* Filter strip */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.5 }}>Total:</Typography>
+              <Typography sx={{ fontSize: 13, fontWeight: 900, color: theme.palette.primary.main, fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit' }}>{totalCampaigns} campaigns</Typography>
+            </Box>
+            <FormControl size="small">
+              <Select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
+                <MenuItem value="All" sx={{ fontSize: 12 }}>All Brands</MenuItem>
+                {allBrands.map(b => <MenuItem key={b} value={b} sx={{ fontSize: 12 }}>{b}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <FormControl size="small">
+              <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
+                {CATEGORY_OPTIONS.map(c => <MenuItem key={c} value={c} sx={{ fontSize: 12 }}>{c === 'All' ? 'All Categories' : c}</MenuItem>)}
+              </Select>
+            </FormControl>
           </Box>
-          <FormControl size="small">
-            <Select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
-              <MenuItem value="All" sx={{ fontSize: 12 }}>All Brands</MenuItem>
-              {allBrands.map(b => <MenuItem key={b} value={b} sx={{ fontSize: 12 }}>{b}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small">
-            <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
-              {CATEGORY_OPTIONS.map(c => <MenuItem key={c} value={c} sx={{ fontSize: 12 }}>{c === 'All' ? 'All Categories' : c}</MenuItem>)}
-            </Select>
-          </FormControl>
-        </Box>
 
-        {/* Gantt + side charts */}
-        <Box sx={{ flex: 1, display: 'flex', gap: 2, minHeight: 0 }}>
-
-          {/* Gantt — 55% */}
+          {/* Bar chart */}
           <Paper
             elevation={0}
             sx={{
-              width: '55%',
-              overflow: 'hidden',
+              flex: 1,
+              p: 2,
               display: 'flex',
               flexDirection: 'column',
+              minHeight: 0,
               bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
               border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
             }}
           >
-            <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5, flexShrink: 0, borderBottom: `1px solid ${theme.palette.divider}` }}>
-              <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800 }}>
-                Campaign Gantt
-              </Typography>
-            </Box>
-            <Box sx={{ flex: 1, minHeight: 0 }}>
-              <GanttChart campaigns={MOCK_CAMPAIGNS} brandFilter={brandFilter} categoryFilter={categoryFilter} />
-            </Box>
+            <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 0.5, display: 'block' }}>
+              Campaigns by Brand
+            </Typography>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={campaignsByBrand} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
+                <XAxis dataKey="brand" tick={{ fontSize: 12, fontWeight: 700, fill: '#0ba0af' }} stroke="rgba(11, 160, 175, 0.4)" />
+                <YAxis tick={{ fontSize: 12, fontWeight: 800 }} stroke={theme.palette.primary.main} allowDecimals={false} />
+                <Tooltip contentStyle={barTooltipStyle.contentStyle} itemStyle={barTooltipStyle.itemStyle} labelStyle={barTooltipStyle.labelStyle} formatter={(val: any) => [val, 'Campaigns']} />
+                <Bar dataKey="count" name="Campaigns" fill={theme.palette.primary.main} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </Paper>
-
-          {/* Side charts — 45% */}
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
-
-            {/* Pie: phase status distribution */}
-            <Paper
-              elevation={0}
-              sx={{
-                flex: 1,
-                p: 2,
-                display: 'flex',
-                flexDirection: 'column',
-                minHeight: 0,
-                bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
-                border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
-              }}
-            >
-              <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 0.5, display: 'block' }}>
-                Phase Status Distribution
-              </Typography>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={phaseStatusCounts}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="30%"
-                    outerRadius="60%"
-                    dataKey="value"
-                    nameKey="name"
-                    paddingAngle={2}
-                  >
-                    {phaseStatusCounts.map((entry, i) => (
-                      <Cell key={i} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={barTooltipStyle.contentStyle}
-                    itemStyle={barTooltipStyle.itemStyle}
-                    labelStyle={barTooltipStyle.labelStyle}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} iconType="circle" iconSize={9} />
-                </PieChart>
-              </ResponsiveContainer>
-            </Paper>
-
-            {/* Bar: campaigns by brand */}
-            <Paper
-              elevation={0}
-              sx={{
-                flex: 1,
-                p: 2,
-                display: 'flex',
-                flexDirection: 'column',
-                minHeight: 0,
-                bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
-                border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
-              }}
-            >
-              <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 0.5, display: 'block' }}>
-                Campaigns by Brand
-              </Typography>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={campaignsByBrand} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
-                  <XAxis
-                    dataKey="brand"
-                    tick={{ fontSize: 10, fontWeight: 700, fill: '#0ba0af' }}
-                    stroke="rgba(11, 160, 175, 0.4)"
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fontWeight: 800 }}
-                    stroke={theme.palette.primary.main}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={barTooltipStyle.contentStyle}
-                    itemStyle={barTooltipStyle.itemStyle}
-                    labelStyle={barTooltipStyle.labelStyle}
-                    formatter={(val: any) => [val, 'Campaigns']}
-                  />
-                  <Bar dataKey="count" name="Campaigns" fill={theme.palette.primary.main} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </Paper>
-
-          </Box>
         </Box>
+
+        {/* Gantt */}
+        <Paper
+          elevation={0}
+          sx={{
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            bgcolor: isDark ? 'transparent' : 'rgba(11, 160, 175, 0.05)',
+            border: isDark ? '1px solid rgba(11, 160, 175, 0.3)' : '1px solid rgba(0,0,0,0.05)',
+          }}
+        >
+          <Box sx={{ px: 2, pt: 1.5, pb: 0.5, flexShrink: 0, borderBottom: `1px solid ${theme.palette.divider}` }}>
+            <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800 }}>
+              Campaign Gantt
+            </Typography>
+          </Box>
+          <Box sx={{ flex: 1, minHeight: 0 }}>
+            <GanttChart campaigns={MOCK_CAMPAIGNS} brandFilter={brandFilter} categoryFilter={categoryFilter} />
+          </Box>
+        </Paper>
+
       </Box>
 
     </Box>
