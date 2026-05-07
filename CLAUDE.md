@@ -1,8 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
-> For full product requirements, business rules, role hierarchy, and implementation roadmap see [PRD.md](PRD.md).
+> Product requirements, role definitions, business rules, and Pepsico PM spec → [PRD.md](PRD.md).
 
 ## Commands
 
@@ -10,112 +10,83 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install          # Install dependencies
 npm run dev          # Start dev server (Express + Vite HMR) on port 3000
 npm run build        # Production build via Vite
-npm run preview      # Preview production build
 npm run lint         # TypeScript type-check (tsc --noEmit)
+npm run preview      # Preview production build
 npm run clean        # Remove dist/
 ```
 
-Node.js >= 20.0.0 required.
+Node.js >= 20.0.0 required. Always run `npm run lint` before committing.
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in:
-- `DATABASE_URL` or `NEON_DB_URL` — Neon PostgreSQL connection string (optional; server degrades gracefully without it)
-- `GEMINI_API_KEY` — Google Gemini API key (required for AI features)
+Copy `.env.example` to `.env`:
+- `DATABASE_URL` or `NEON_DB_URL` — Neon PostgreSQL (optional; `/api/opened-cases` degrades to 503 without it)
+- `GEMINI_API_KEY` — Google Gemini (only required for AI features)
+- `GOOGLE_SHEETS_ID` — Roster spreadsheet ID (default value present in code, no creds needed since the sheet is public)
 
 ## Architecture
 
-**ORBIT** is a role-based KPI dashboard for Alta MX — React 19 frontend served by an Express 4 backend with optional Neon PostgreSQL.
+React 19 + Vite frontend, Express 4 backend. Two parallel server entry points share roster logic but run in different environments — keep them in sync when changing API behavior.
 
-### Data flow
+### Backend entry points
 
-```
-server.ts (Express)
-  ├── /api/health        → DB connectivity check
-  └── /api/opened-cases  → Queries pg pool with varchar date filtering done in JS
-
-src/
-  ├── context/AuthContext.tsx   → Global auth, selectedMember, managementTab, dateRange
-  ├── services/apiService.ts    → fetchOpenedCases(), checkApiHealth()
-  ├── data/mockData.ts          → MOCK_USERS (manual copy of Roster), METRICS_DATA, getFilteredMetrics()
-  └── components/
-        ├── App.tsx             → ThemeProvider + AuthProvider + Login/Dashboard routing
-        ├── Dashboard.tsx       → Role dispatch → correct View component
-        ├── Sidebar.tsx         → Date pickers (dayjs), member selection, collapsible
-        ├── Header.tsx          → Navigation bar
-        └── Views/
-              ├── AgentView.tsx           → Agent/Leader view (~1938 lines, most complex)
-              ├── ProjectManagerView.tsx  → Manager/Executive operational metrics
-              ├── FinancialView.tsx       → Financial KPIs (Executive only)
-              └── ExecutiveView.tsx       → Executive global KPIs + multi-client charts (exists but not yet wired into Dashboard routing)
-```
-
-### Role system
-
-Roles: `Agent | Leader | Manager | Executive | PM`
-
-- **`Staff`** — previously defined in the type but has no users and no logic. **Eliminated.**
-- **`PM`** — exclusive to Pepsico. Manages projects, does not supervise agents. Views not yet defined. Pending implementation.
-
-ServiceDesks: `CAC | Fleet | Premium | Manager | Executive`
-
-**Tab switcher** (`Operational | Administrative | Financial`) is visible to Leaders and above, stored in `AuthContext`. The active tab determines which View renders inside `Dashboard.tsx`.
-
-| Role | Operational | Administrative | Financial |
-|------|:-----------:|:--------------:|:---------:|
-| Agent | ✅ own view | ✅ own view | ❌ |
-| Leader | ✅ team view | ✅ team view | ❌ |
-| Manager | ✅ | ✅ | ❌ |
-| Executive | ✅ | ✅ | ✅ |
-| PM | TBD | TBD | ❌ |
-
-**Drilling navigation:**
-- Executive or Manager clicks a bar in the "Average Performance by Department" chart (Operational tab) → renders that department's Leader view.
-- Executive, Manager, or Leader selects a name from the Sidebar dropdown → renders that Agent's view with a back button (`AuthContext.selectedMember`).
-
-### Client isolation
-
-- **Executive**: sees all clients (Stellantis + Pepsico).
-- **Manager, Leader, Agent**: only see their own client. Stellantis roles have no access to Pepsico data and vice versa.
-- **Pepsico**: currently only present in the Executive's Financial tab. All other Pepsico views (PM role, operational data) are pending implementation.
-
-### Data sources
-
-| Data | Current source | Notes |
-|------|---------------|-------|
-| Roster / User login | `mockData.ts` (manual copy of Google Sheets) | Google Sheets live integration is **pending implementation** |
-| Agent metrics | `mockData.ts` with pseudo-random fluctuation by date range | |
-| Opened cases | Neon PostgreSQL via `/api/opened-cases` | Functional |
-| Financial data | Hardcoded mock in `FinancialView.tsx` | Executive only |
-
-### Styling
-
-- **MUI 9** (`@mui/material`) is the primary component library; use the `sx` prop for one-off styles.
-- **Tailwind CSS 4** is available for utility classes via `@tailwindcss/vite`.
-- Light/dark mode is toggled at the root `App.tsx` level and threaded down via `ThemeProvider`.
-- `AspectRatioWrapper` enforces a 16:9 letterbox layout for the main content area.
-
-### Key libraries
-
-| Purpose | Library |
+| File | Used by |
 |---|---|
-| Charts | Recharts |
-| Date handling | dayjs + `customParseFormat` plugin, `@mui/x-date-pickers` |
-| Icons | `@mui/icons-material`, `lucide-react` |
-| Animation | `motion` (framer-motion fork) |
-| DB client | `pg` (pooled, SSL) |
-| AI | `@google/genai` (Gemini) |
+| `server.ts` | Local dev (`npm run dev`) — Express with Vite middleware, full HMR |
+| `api/index.ts` | Vercel production — same Express app exported as a serverless function |
 
-### Vite / HMR note
+`vercel.json` rewrites `/api/*` → `/api/index` and everything else → `/index.html`.
 
-HMR can be disabled by setting `DISABLE_HMR=true` in the environment (used in AI Studio to prevent flickering during agent edits).
+### Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET  /api/health` | DB connectivity check |
+| `GET  /api/roster` | All Roster users (5-min in-memory cache) |
+| `POST /api/login` | RFC lookup against Roster, returns user or 404 |
+| `GET  /api/opened-cases` | Neon PostgreSQL query, varchar date filtering done in JS |
+
+The Roster is fetched from Google Sheets via the public CSV export URL (`gviz/tq?tqx=out:csv`) — **no service account or credentials**. If that ever changes (sheet made private), `fetchRosterFromSheets()` lives in both `server.ts` and `api/index.ts` and must be updated in both.
+
+### Frontend layout
+
+```
+src/
+├── context/AuthContext.tsx   Global state: user, users (RFC→User map), selectedMember, managementTab, dateRange
+├── services/apiService.ts    fetchOpenedCases(), checkApiHealth()
+├── data/mockData.ts          METRICS_DATA + getFilteredMetrics() + generateHistoricalData() (no user data here)
+└── components/
+    ├── App.tsx               ThemeProvider + AuthProvider + Login/Dashboard
+    ├── Dashboard.tsx         Role dispatch → View
+    ├── Sidebar.tsx           Date pickers, management tabs, member dropdown (all hidden for PM)
+    ├── Login.tsx             RFC entry, async login via /api/login
+    └── Views/
+        ├── AgentView.tsx           Agent/Leader (largest, ~1900 lines)
+        ├── ProjectManagerView.tsx  Manager/Executive operational + admin tabs
+        ├── FinancialView.tsx       Executive only
+        ├── ExecutiveView.tsx       Exists, NOT yet wired into Dashboard routing
+        └── PMView.tsx              Pepsico PM — KPIs, trend chart, Gantt
+```
+
+### Conventions
+
+- Use `ManagementIndicator` (defined in `AgentView.tsx`, duplicated locally in `PMView.tsx`) for all KPI cards. It carries the formula tooltip, color logic, and quartile band — match this style anywhere KPIs are displayed.
+- All Recharts charts share the same dark/light tooltip + axis styling. When adding a new chart, mirror the props from `AgentView.tsx` (CartesianGrid `vertical={false}`, primary-color stroke axes, `strokeWidth={4}` lines with hollow dots).
+- MUI 9 `sx` prop for styles. Tailwind 4 is available via `@tailwindcss/vite` for utility classes.
+- `dayjs` with `customParseFormat` for date handling; date pickers from `@mui/x-date-pickers`.
+- `motion` (Framer Motion fork) for animation, `lucide-react` + `@mui/icons-material` for icons.
+
+### HMR
+
+`DISABLE_HMR=true` disables Vite HMR (used in environments like AI Studio that flicker during agent edits).
 
 ## UI Rules
 
-- Nunca permitir que elementos de texto se sobrepongan visualmente
-- Todo layout debe usar sistemas de flujo (flex, grid), evitar posicionamiento absoluto para texto
-- Usar truncamiento cuando el contenido exceda el contenedor:
-  - single line: text-overflow: ellipsis
-  - multi-line: line-clamp
-- Contenedores deben permitir crecimiento dinámico (no usar alturas fijas con texto variable)
-- Siempre validar responsive (mobile, tablet, desktop)
+- Never let text overlap. Use flex/grid flow — never absolute positioning for text.
+- Truncate when content exceeds container: `text-overflow: ellipsis` (single line) or `line-clamp` (multi-line).
+- Containers must allow dynamic growth — avoid fixed heights with variable text.
+- Validate responsive at mobile, tablet, desktop.
+
+## Working with Roster data
+
+User data is **never** hardcoded. `MOCK_USERS` no longer exists. Components read users from `useAuth().users` (RFC→User map populated from `/api/roster` on mount). When adding a feature that needs to look up a user by RFC, by role, or by serviceDesk, use `Object.values(users).find(...)` — don't reach for a static map.

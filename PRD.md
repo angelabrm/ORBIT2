@@ -41,9 +41,12 @@ Diseñar y documentar el dashboard corporativo ORBIT para Alta MX, que permite a
 | Nivel | Rol del usuario: Agent, Leader, Manager, Executive, PM |
 | MESA_ | Department al que pertenece el usuario dentro del cliente |
 
-**Estado actual:** La integración en tiempo real con Google Sheets está **pendiente de implementar**. Actualmente los datos del Roster están copiados manualmente en `src/data/mockData.ts`. El login funciona correctamente contra estos datos estáticos.
+**Estado actual:** La integración en tiempo real con Google Sheets está **implementada**. El backend (`server.ts` en local, `api/index.ts` en Vercel) descarga el Roster directamente desde la URL pública CSV de Google Sheets (`gviz/tq?tqx=out:csv`) con un caché en memoria de 5 minutos. No requiere credenciales — la hoja está compartida públicamente. El frontend consume:
 
-**Pendiente:** Implementar sincronización automática con Google Sheets para que el Roster del dashboard refleje siempre el estado real del archivo.
+- `GET /api/roster` — lista completa de usuarios para hidratar `AuthContext.users`
+- `POST /api/login` — recibe `{ rfc }`, devuelve el usuario o 404
+
+Los datos de usuario ya **no** existen en `mockData.ts`. Si la hoja se vuelve privada, se debe migrar a un service account de Google Cloud y actualizar `fetchRosterFromSheets()` en ambos archivos del backend.
 
 ---
 
@@ -179,25 +182,27 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 
 ### Implementado y funcional
 
-- Roles Agent, Leader, Manager, Executive con sus vistas correspondientes
+- Roles Agent, Leader, Manager, Executive, PM con sus vistas correspondientes
 - Tabs Operational / Administrative / Financial con control de acceso por rol
 - Drilling: clic en barra de gráfico → vista de Leader; dropdown → vista de Agent
-- Autenticación por RFC contra datos del Roster (estáticos en `mockData.ts`)
+- **Integración en tiempo real con Google Sheets** vía CSV público (`/api/roster`, `/api/login`) con caché de 5 minutos
+- Sidebar oculta tabs de management y dropdown de miembros cuando el usuario es PM
 - Cliente Stellantis con departments CAC, Fleet, Premium
 - Manager de Pepsico con su vista operativa
 - Pestaña Financial del Executive con datos de Stellantis y Pepsico
+- **Vista PM** con KPIs (Performance + Ranking con cuartil), gráfico de tendencias, Gantt jerárquico y gráficos auxiliares (datos mock)
 - Backend Express con endpoint de casos abiertos (Neon PostgreSQL)
+- Despliegue en Vercel con `api/index.ts` como serverless function
 - Aislamiento de sesión al cerrar
 
 ### Pendiente de implementar
 
 | Item | Descripción |
 |------|-------------|
-| Google Sheets — integración en tiempo real | Sincronización automática del Roster desde Google Sheets |
 | `ExecutiveView` activa | Conectar `ExecutiveView.tsx` al routing de `Dashboard.tsx` |
-| Vistas PM de Pepsico | Implementar Gantt jerárquico, métricas y drill-down Manager→PM |
-| Fuente de datos campañas Pepsico | Definir e integrar la fuente de datos de campañas (fases, tasks, fechas) |
-| Vistas operativas de Pepsico | Datos operativos del equipo Pepsico más allá del Financial |
+| Fuente de datos campañas Pepsico | Reemplazar el mock de campañas en `PMView.tsx` con la fuente real (fases, tasks, fechas, estados) |
+| Vista Manager Pepsico | Drill-down del Manager hacia el rendimiento individual de cada PM |
+| Vistas operativas de Pepsico | Datos operativos del equipo Pepsico más allá del Financial y PM |
 | Control de acceso backend | Validación de rol/cliente en endpoints de la API |
 
 ---
@@ -280,23 +285,39 @@ Comportamiento de expansión:
 - Expandido a **Fase**: se despliegan las 8 fases con su duración individual en el Gantt
 - Expandido a **Task**: se listan las tareas de cada fase sin representación gráfica
 
-### Métricas del dashboard PM
+### Layout de la vista PM (`PMView.tsx`)
+
+Tres niveles horizontales apilados verticalmente:
+
+| Nivel | Altura | Contenido |
+|-------|--------|-----------|
+| 1 | 20% | **My Performance** (50%) + **My Ranking** (50%) — ambos con el mismo `ManagementIndicator` que la vista Agent. My Ranking incluye la franja superior con formato condicional Q1–Q4 ("YOU ARE POSITIONED IN PERFORMANCE QUARTILE QX"). |
+| 2 | 30% | **Gráfico de líneas de tendencias** (50%) con dropdown multi-indicador y selector de jerarquía temporal (Months / Weeks / Quarters); **Gráfico de pie** de Phase Status Distribution (50%). |
+| 3 | resto | **Gráfico de barras** Campaigns by Brand (50%) con strip de filtros encima (Total + Brand + Category); **Gantt jerárquico** (50%). |
+
+Sidebar: para usuarios con rol PM se ocultan los botones de Operational / Administrative / Financial y el dropdown de miembros del equipo. Solo se conservan los date pickers y el toggle de modo claro/oscuro.
+
+### Métricas del dashboard PM (estado actual)
 
 | Métrica | Estado |
 |---------|--------|
-| Cantidad de campañas por fase | Por implementar |
-| % Cumplimiento de tiempos | Por definir — valor default en la implementación inicial |
-| Estado por fase (Pendiente / En progreso / Completada / Retrasada) | Por definir — valor default en la implementación inicial |
-| Otras métricas operativas | Por definir en fase posterior |
+| My Performance (% on-time rate) | Implementado con datos mock |
+| My Ranking (TOP X% + cuartil) | Implementado con datos mock |
+| Phase Status Distribution (Pie) | Implementado — agrega Completed / In Progress / Pending / Delayed |
+| Campaigns by Brand (Bar) | Implementado |
+| Tendencias temporales (On-Time Rate, Campaign Count, Completion Rate) | Implementado con datos mock |
+| Gantt jerárquico Brand → Campaña → Fase → Task | Implementado, expandible por fila |
 
-### Vista Manager (equipo Pepsico)
+Pendiente: reemplazar el mock por datos reales y definir las fórmulas finales de Performance y Ranking.
+
+### Vista Manager (equipo Pepsico) — pendiente
 
 - Rendimiento general del equipo de PMs
 - Drill-down a la vista individual de cada PM (mismo mecanismo que en Stellantis: dropdown en Sidebar)
 
 ### Fuente de datos
 
-Los datos de campañas (nombres, fechas, fases, tasks, estados) provienen de una fuente externa aún por definir, separada del Roster de Google Sheets.
+Los datos de campañas (nombres, fechas, fases, tasks, estados) provienen de una fuente externa aún por definir, separada del Roster de Google Sheets. La implementación actual usa un mock interno en `PMView.tsx`.
 
 ### Jerarquía de acceso Pepsico
 
