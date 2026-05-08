@@ -538,7 +538,7 @@ const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilt
 
 // ─── Main PMView ──────────────────────────────────────────────────────────────
 
-const INDICATOR_OPTIONS = ['On-Time Rate', 'Campaign Count', 'Completion Rate'];
+const INDICATOR_OPTIONS = ['On Time Rate', 'QA Rate', 'Performance'];
 
 type HierarchyKey = 'day' | 'week' | 'month' | 'quarter' | 'year';
 const HIERARCHY_LABELS: Record<HierarchyKey, string> = {
@@ -552,7 +552,7 @@ const HIERARCHY_LABELS: Record<HierarchyKey, string> = {
 const CATEGORY_OPTIONS = ['All', 'Biscuit', 'Savory'];
 
 function buildTrendData(start: dayjs.Dayjs, end: dayjs.Dayjs, hierarchy: HierarchyKey) {
-  const data: { name: string; fullDate: string; 'On-Time Rate': number; 'Campaign Count': number; 'Completion Rate': number }[] = [];
+  const data: { name: string; fullDate: string; 'On Time Rate': number; 'QA Rate': number; 'Performance': number }[] = [];
 
   let cur: dayjs.Dayjs;
   if (hierarchy === 'day') cur = start.startOf('day');
@@ -570,8 +570,8 @@ function buildTrendData(start: dayjs.Dayjs, end: dayjs.Dayjs, hierarchy: Hierarc
       return x - Math.floor(x);
     };
     const onTime = 65 + Math.floor(r(1) * 35);
-    const completion = 45 + Math.floor(r(2) * 50);
-    const count = 1 + Math.floor(r(3) * 5);
+    const qa = 70 + Math.floor(r(2) * 30);
+    const performance = Math.round(onTime * 0.5 + qa * 0.5);
 
     let name = '';
     if (hierarchy === 'day') name = cur.format('MMM DD');
@@ -583,9 +583,9 @@ function buildTrendData(start: dayjs.Dayjs, end: dayjs.Dayjs, hierarchy: Hierarc
     data.push({
       name,
       fullDate: cur.toISOString(),
-      'On-Time Rate': onTime,
-      'Campaign Count': count,
-      'Completion Rate': completion,
+      'On Time Rate': onTime,
+      'QA Rate': qa,
+      'Performance': performance,
     });
 
     if (hierarchy === 'day') cur = cur.add(1, 'day');
@@ -616,7 +616,7 @@ const PMView: React.FC = () => {
 
   const [hierarchy, setHierarchy] = useState<HierarchyKey>('month');
   const [hierarchyAnchor, setHierarchyAnchor] = useState<null | HTMLElement>(null);
-  const [selectedIndicators, setSelectedIndicators] = useState<string[]>(['On-Time Rate', 'Completion Rate']);
+  const [selectedIndicators, setSelectedIndicators] = useState<string[]>(['Performance', 'On Time Rate']);
   const [brandFilter, setBrandFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState<number | 'All'>('All');
@@ -703,9 +703,9 @@ const PMView: React.FC = () => {
             title="My Performance"
             value={`${onTimeRate}%`}
             icon={<Activity size={24} />}
-            formula="(Campaigns without delayed phases / Total campaigns) × 100"
+            formula="(On Time Rate × 50%) + (QA Rate × 50%)"
             color={getOnTimeColor(onTimeRate)}
-            description="Your overall on-time delivery rate across all assigned campaigns. 100% means every campaign phase was completed on schedule."
+            description="Your overall performance score. It combines on-time campaign delivery (50%) and quality assurance score (50%)."
           />
         </Box>
         <Box sx={{ flex: 1 }}>
