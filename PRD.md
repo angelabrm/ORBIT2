@@ -291,24 +291,35 @@ Tres niveles horizontales apilados verticalmente:
 
 | Nivel | Altura | Contenido |
 |-------|--------|-----------|
-| 1 | 20% | **My Performance** (50%) + **My Ranking** (50%) — ambos con el mismo `ManagementIndicator` que la vista Agent. My Ranking incluye la franja superior con formato condicional Q1–Q4 ("YOU ARE POSITIONED IN PERFORMANCE QUARTILE QX"). |
-| 2 | 30% | **Gráfico de líneas de tendencias** (50%) con dropdown multi-indicador y selector de jerarquía temporal (Months / Weeks / Quarters); **Gráfico de pie** de Phase Status Distribution (50%). |
-| 3 | resto | **Gráfico de barras** Campaigns by Brand (50%) con strip de filtros encima (Total + Brand + Category); **Gantt jerárquico** (50%). |
+| 1 | 24% | **My Performance** (50%) + **My Ranking** (50%) — ambos con el mismo `ManagementIndicator` que la vista Agent. My Ranking incluye la franja superior con formato condicional Q1–Q4 ("YOU ARE POSITIONED IN PERFORMANCE QUARTILE QX"). |
+| 2 | 30% | **Gráfico de líneas de tendencias** (50%) con dropdown multi-indicador y selector de jerarquía temporal (Days / Weeks / Months / Quarters / Years); **Pie chart** *Campaign Distribution by Status* (50%). |
+| 3 | resto | Strip de filtros (tile **Total Campaigns** + Brand + Category + Status), debajo: **Gantt jerárquico** (50%) | **Campaigns by Brand** bar chart (50%). Gantt y Bar comparten la misma altura. |
 
-Sidebar: para usuarios con rol PM se ocultan los botones de Operational / Administrative / Financial y el dropdown de miembros del equipo. Solo se conservan los date pickers y el toggle de modo claro/oscuro.
+**Eje X del gráfico de líneas:** se construye dinámicamente a partir de `startDate`/`endDate` del Sidebar y la jerarquía temporal seleccionada. Cambiar el rango en el menú lateral repinta el chart.
+
+**Indicadores del gráfico de líneas:** On Time Rate, QA Rate, Performance. Hasta dos seleccionables simultáneamente. Performance se calcula como `0.5 × On Time Rate + 0.5 × QA Rate`.
+
+**Pie chart:** los 8 segmentos corresponden a las 8 fases (01 Brief … 08 Closing Campaign). Cada campaña se cuenta en su **fase actual** (la primera fase no Completed, o la última fase si todas están completas). No se filtra por los segmenters — siempre muestra la distribución global.
+
+**Tile Total Campaigns:** indicador prominente con borde teal y número grande monospace. Refleja en tiempo real los filtros Brand + Category + Status. Cuando hay filtro activo muestra `N / total`.
+
+**Filtros (Brand + Category + Status):** afectan al tile Total, al Gantt y al Bar chart. El Status filter usa la fase actual (misma definición que el pie). El menú de Status muestra un punto de color por fase para escaneo visual rápido.
+
+**Sidebar:** para usuarios con rol PM se ocultan los botones de Operational / Administrative / Financial y el dropdown de miembros del equipo. Solo se conservan los date pickers (que ahora alimentan el eje X del gráfico de líneas) y el toggle de modo claro/oscuro.
 
 ### Métricas del dashboard PM (estado actual)
 
 | Métrica | Estado |
 |---------|--------|
-| My Performance (% on-time rate) | Implementado con datos mock |
-| My Ranking (TOP X% + cuartil) | Implementado con datos mock |
-| Phase Status Distribution (Pie) | Implementado — agrega Completed / In Progress / Pending / Delayed |
+| My Performance — `(0.5 × On Time Rate) + (0.5 × QA Rate)` | Implementado con datos mock |
+| My Ranking (TOP X% + cuartil Q1–Q4) | Implementado con datos mock |
+| Total Campaigns (tile interactivo) | Implementado, reactivo a Brand/Category/Status |
+| Campaign Distribution by Status (Pie por fase actual) | Implementado |
 | Campaigns by Brand (Bar) | Implementado |
-| Tendencias temporales (On-Time Rate, Campaign Count, Completion Rate) | Implementado con datos mock |
+| Tendencias temporales (On Time Rate, QA Rate, Performance) | Implementado con datos mock generados por seed determinista |
 | Gantt jerárquico Brand → Campaña → Fase → Task | Implementado, expandible por fila |
 
-Pendiente: reemplazar el mock por datos reales y definir las fórmulas finales de Performance y Ranking.
+Pendiente: reemplazar el mock por datos reales y validar las fórmulas finales de Performance, Ranking y QA Rate con el equipo Pepsico.
 
 ### Vista Manager (equipo Pepsico) — pendiente
 

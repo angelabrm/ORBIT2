@@ -70,7 +70,7 @@ src/
 
 ### Conventions
 
-- Use `ManagementIndicator` (defined in `AgentView.tsx`, duplicated locally in `PMView.tsx`) for all KPI cards. It carries the formula tooltip, color logic, and quartile band — match this style anywhere KPIs are displayed.
+- Use `ManagementIndicator` for all KPI cards — it carries the formula tooltip, color logic, and the quartile band. Defined in `AgentView.tsx`; `PMView.tsx` keeps its own slightly tighter copy (smaller value font + `whiteSpace: nowrap`) because its cards are narrower. When extracting a shared component, preserve both sizing variants.
 - All Recharts charts share the same dark/light tooltip + axis styling. When adding a new chart, mirror the props from `AgentView.tsx` (CartesianGrid `vertical={false}`, primary-color stroke axes, `strokeWidth={4}` lines with hollow dots).
 - MUI 9 `sx` prop for styles. Tailwind 4 is available via `@tailwindcss/vite` for utility classes.
 - `dayjs` with `customParseFormat` for date handling; date pickers from `@mui/x-date-pickers`.
