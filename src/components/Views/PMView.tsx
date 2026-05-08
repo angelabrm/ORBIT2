@@ -913,14 +913,14 @@ const PMView: React.FC = () => {
               sx={{ fontSize: 12, height: 36, minWidth: 180, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}
               renderValue={val =>
                 val === 'All'
-                  ? 'All Statuses'
+                  ? 'All Status'
                   : (() => {
                       const def = PHASE_DEFS.find(p => p.number === val);
-                      return def ? `${String(def.number).padStart(2, '0')} ${def.name}` : 'All Statuses';
+                      return def ? `${String(def.number).padStart(2, '0')} ${def.name}` : 'All Status';
                     })()
               }
             >
-              <MenuItem value="All" sx={{ fontSize: 12 }}>All Statuses</MenuItem>
+              <MenuItem value="All" sx={{ fontSize: 12 }}>All Status</MenuItem>
               {PHASE_DEFS.map(def => (
                 <MenuItem key={def.number} value={def.number} sx={{ fontSize: 12 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
