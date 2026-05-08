@@ -375,15 +375,20 @@ interface GanttProps {
   campaigns: Campaign[];
   brandFilter: string;
   categoryFilter: string;
+  statusFilter: number | 'All';
 }
 
-const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilter }) => {
+const GanttChart: React.FC<GanttProps> = ({ campaigns, brandFilter, categoryFilter, statusFilter }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+
+  const currentPhaseOf = (c: Campaign) =>
+    c.phases.find(p => p.status !== 'Completed') || c.phases[c.phases.length - 1];
 
   const filtered = campaigns.filter(c => {
     if (brandFilter !== 'All' && c.brand !== brandFilter) return false;
     if (categoryFilter !== 'All' && c.category !== categoryFilter) return false;
+    if (statusFilter !== 'All' && currentPhaseOf(c).number !== statusFilter) return false;
     return true;
   });
 
@@ -614,32 +619,43 @@ const PMView: React.FC = () => {
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>(['On-Time Rate', 'Completion Rate']);
   const [brandFilter, setBrandFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState<number | 'All'>('All');
 
   const allBrands = Array.from(new Set(MOCK_CAMPAIGNS.map(c => c.brand)));
 
+  // Helper: a campaign's CURRENT phase = first non-completed phase, or last if all done
+  const currentPhaseOf = (c: Campaign) =>
+    c.phases.find(p => p.status !== 'Completed') || c.phases[c.phases.length - 1];
+
+  // Apply Brand + Category + Status filters
+  const filteredCampaigns = MOCK_CAMPAIGNS.filter(c => {
+    if (brandFilter !== 'All' && c.brand !== brandFilter) return false;
+    if (categoryFilter !== 'All' && c.category !== categoryFilter) return false;
+    if (statusFilter !== 'All' && currentPhaseOf(c).number !== statusFilter) return false;
+    return true;
+  });
+
   const totalCampaigns = MOCK_CAMPAIGNS.length;
+  const filteredTotal = filteredCampaigns.length;
   const delayedCampaigns = MOCK_CAMPAIGNS.filter(c => c.phases.some(p => p.status === 'Delayed')).length;
   const onTimeRate = Math.round(((totalCampaigns - delayedCampaigns) / totalCampaigns) * 100);
   const rankingPercentile = 18;
   const myQuartile = 'Q1';
 
-  // Pie: count campaigns by their CURRENT phase (first non-completed phase, or Closing if all done)
-  const campaignsByPhase = PHASE_DEFS.map(def => {
-    const count = MOCK_CAMPAIGNS.filter(c => {
-      const currentPhase = c.phases.find(p => p.status !== 'Completed') || c.phases[c.phases.length - 1];
-      return currentPhase.number === def.number;
-    }).length;
-    return {
-      name: `${String(def.number).padStart(2, '0')} ${def.name}`,
-      value: count,
-      color: def.color,
-    };
-  });
-
-  const campaignsByBrand = allBrands.map(brand => ({
-    brand,
-    count: MOCK_CAMPAIGNS.filter(c => c.brand === brand).length,
+  // Pie: count ALL campaigns by their current phase (independent of filters)
+  const campaignsByPhase = PHASE_DEFS.map(def => ({
+    name: `${String(def.number).padStart(2, '0')} ${def.name}`,
+    value: MOCK_CAMPAIGNS.filter(c => currentPhaseOf(c).number === def.number).length,
+    color: def.color,
   }));
+
+  // Bar: filtered campaigns grouped by brand
+  const campaignsByBrand = allBrands
+    .map(brand => ({
+      brand,
+      count: filteredCampaigns.filter(c => c.brand === brand).length,
+    }))
+    .filter(x => x.count > 0);
 
   const trendData = useMemo(
     () => buildTrendData(startDate, endDate, hierarchy),
@@ -831,20 +847,88 @@ const PMView: React.FC = () => {
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0 }}>
 
         {/* Filter strip — full width above both panels */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography sx={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.5 }}>Total:</Typography>
-            <Typography sx={{ fontSize: 13, fontWeight: 900, color: theme.palette.primary.main, fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit' }}>{totalCampaigns} campaigns</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 2, flexShrink: 0 }}>
+
+          {/* Total Campaigns — interactive KPI tile */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              px: 2,
+              py: 0.8,
+              borderRadius: 1.5,
+              bgcolor: isDark ? 'rgba(11, 160, 175, 0.12)' : 'rgba(11, 160, 175, 0.1)',
+              border: `1.5px solid ${theme.palette.primary.main}`,
+              boxShadow: isDark ? `0 0 12px ${theme.palette.primary.main}33` : 'none',
+            }}
+          >
+            <Typography
+              sx={{
+                fontSize: 10,
+                fontWeight: 800,
+                textTransform: 'uppercase',
+                letterSpacing: 1.5,
+                color: theme.palette.primary.main,
+                opacity: 0.85,
+                lineHeight: 1.1,
+              }}
+            >
+              Total<br />Campaigns
+            </Typography>
+            <Typography
+              sx={{
+                fontSize: 28,
+                fontWeight: 900,
+                color: theme.palette.primary.main,
+                fontFamily: isDark ? '"JetBrains Mono", monospace' : 'inherit',
+                textShadow: isDark ? `0 0 12px ${theme.palette.primary.main}66` : 'none',
+                lineHeight: 1,
+              }}
+            >
+              {filteredTotal}
+            </Typography>
+            {filteredTotal !== totalCampaigns && (
+              <Typography sx={{ fontSize: 10, opacity: 0.5, fontWeight: 700, alignSelf: 'flex-end' }}>
+                / {totalCampaigns}
+              </Typography>
+            )}
           </Box>
+
           <FormControl size="small">
-            <Select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
+            <Select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} sx={{ fontSize: 12, height: 36, minWidth: 130, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
               <MenuItem value="All" sx={{ fontSize: 12 }}>All Brands</MenuItem>
               {allBrands.map(b => <MenuItem key={b} value={b} sx={{ fontSize: 12 }}>{b}</MenuItem>)}
             </Select>
           </FormControl>
           <FormControl size="small">
-            <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} sx={{ fontSize: 12, height: 30, minWidth: 120, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
+            <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} sx={{ fontSize: 12, height: 36, minWidth: 130, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}>
               {CATEGORY_OPTIONS.map(c => <MenuItem key={c} value={c} sx={{ fontSize: 12 }}>{c === 'All' ? 'All Categories' : c}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small">
+            <Select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as number | 'All')}
+              sx={{ fontSize: 12, height: 36, minWidth: 180, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white' }}
+              renderValue={val =>
+                val === 'All'
+                  ? 'All Statuses'
+                  : (() => {
+                      const def = PHASE_DEFS.find(p => p.number === val);
+                      return def ? `${String(def.number).padStart(2, '0')} ${def.name}` : 'All Statuses';
+                    })()
+              }
+            >
+              <MenuItem value="All" sx={{ fontSize: 12 }}>All Statuses</MenuItem>
+              {PHASE_DEFS.map(def => (
+                <MenuItem key={def.number} value={def.number} sx={{ fontSize: 12 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: def.color }} />
+                    {String(def.number).padStart(2, '0')} {def.name}
+                  </Box>
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
         </Box>
@@ -871,7 +955,7 @@ const PMView: React.FC = () => {
               </Typography>
             </Box>
             <Box sx={{ flex: 1, minHeight: 0 }}>
-              <GanttChart campaigns={MOCK_CAMPAIGNS} brandFilter={brandFilter} categoryFilter={categoryFilter} />
+              <GanttChart campaigns={MOCK_CAMPAIGNS} brandFilter={brandFilter} categoryFilter={categoryFilter} statusFilter={statusFilter} />
             </Box>
           </Paper>
 
