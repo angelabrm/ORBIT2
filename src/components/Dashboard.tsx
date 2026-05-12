@@ -41,7 +41,7 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
       case 'Leader':
         return <AgentView member={member} />;
       case 'PM':
-        return <PMView />;
+        return <PMView member={member} />;
       default:
         return <AgentView member={member} />;
     }

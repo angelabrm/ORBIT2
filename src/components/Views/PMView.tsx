@@ -448,10 +448,13 @@ const getRankingColor = (rank: number) => {
   return '#ea5713';
 };
 
-const PMView: React.FC = () => {
+const PMView: React.FC<{ member?: any }> = ({ member }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   const { user, startDate, endDate } = useAuth();
+
+  // Use viewed member's RFC when a manager is "viewing as" a PM
+  const activeRfc = (member ?? user)?.rfc ?? '';
 
   const [hierarchy, setHierarchy] = useState<HierarchyKey>('month');
   const [hierarchyAnchor, setHierarchyAnchor] = useState<null | HTMLElement>(null);
@@ -460,9 +463,9 @@ const PMView: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState<number | 'All'>('All');
 
-  // Generate campaigns and metrics seeded by this PM's RFC
-  const campaigns = useMemo(() => user ? generateCampaignsForPM(user.rfc) : [], [user?.rfc]);
-  const metrics   = useMemo(() => user ? generatePMMetrics(user.rfc)      : { onTimeRate: 0, qaRate: 0, performance: 0 }, [user?.rfc]);
+  // Generate campaigns and metrics seeded by the active PM's RFC
+  const campaigns = useMemo(() => activeRfc ? generateCampaignsForPM(activeRfc) : [], [activeRfc]);
+  const metrics   = useMemo(() => activeRfc ? generatePMMetrics(activeRfc)       : { onTimeRate: 0, qaRate: 0, performance: 0 }, [activeRfc]);
 
   const allBrands = Array.from(new Set(campaigns.map(c => c.brand)));
 
@@ -500,8 +503,8 @@ const PMView: React.FC = () => {
     .filter(x => x.count > 0);
 
   const trendData = useMemo(
-    () => buildPMTrendData(startDate, endDate, hierarchy, user?.rfc ?? ''),
-    [startDate, endDate, hierarchy, user?.rfc]
+    () => buildPMTrendData(startDate, endDate, hierarchy, activeRfc),
+    [startDate, endDate, hierarchy, activeRfc]
   );
 
   const handleIndicatorChange = (event: any) => {

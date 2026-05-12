@@ -43,13 +43,15 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
   const theme = useTheme();
   const { user, users, logout, selectedMember, setSelectedMember, startDate, setStartDate, endDate, setEndDate } = useAuth();
 
-  const isPM = user?.role === 'PM';
-  const isLeader = user?.role === 'Leader';
-  const isManager = user?.role === 'Manager' || user?.role === 'Executive';
+  const isPM               = user?.role === 'PM';
+  const isLeader           = user?.role === 'Leader';
+  const isManager          = user?.role === 'Manager' || user?.role === 'Executive';
+  const isPepsicoManager   = user?.role === 'Manager' && user?.client === 'Pepsico';
   const canSeeAgentDropdown = !isPM && (isLeader || isManager);
   const { managementTab, setManagementTab } = useAuth();
 
-  const showManagementTabs = !isPM && user && (
+  // Pepsico Manager has no Operational/Administrative tabs
+  const showManagementTabs = !isPM && !isPepsicoManager && user && (
     ["Leader", "Manager", "Executive"].includes(user.role) ||
     user.serviceDesk === 'CAC' ||
     user.serviceDesk === 'Fleet' ||
@@ -260,17 +262,17 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
 
       {canSeeAgentDropdown && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <Typography 
-            variant="caption" 
-            sx={{ 
-              fontSize: 10, 
-              textTransform: 'uppercase', 
-              color: '#ffffff88', 
-              letterSpacing: 1, 
-              fontWeight: 700 
+          <Typography
+            variant="caption"
+            sx={{
+              fontSize: 10,
+              textTransform: 'uppercase',
+              color: '#ffffff88',
+              letterSpacing: 1,
+              fontWeight: 700
             }}
           >
-            {isManager ? 'All Team Members' : 'Team Member'}
+            {isPepsicoManager ? 'Team Members' : isManager ? 'All Team Members' : 'Team Member'}
           </Typography>
           <FormControl fullWidth size="small">
             <Select
@@ -280,9 +282,11 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
                 const memberRfc = e.target.value as string;
                 if (memberRfc) {
                   setSelectedMember(users[memberRfc]);
+                } else {
+                  setSelectedMember(null);
                 }
               }}
-              sx={{ 
+              sx={{
                 bgcolor: 'rgba(255,255,255,0.1)',
                 color: '#fff',
                 fontSize: 13,
@@ -292,23 +296,33 @@ const Sidebar: React.FC<SidebarProps> = ({ mode, toggleTheme }) => {
               }}
             >
               <MenuItem value=""><em>View All</em></MenuItem>
-              
+
               {isLeader && user?.team?.map((rfc) => (
                 <MenuItem key={rfc} value={rfc}>
                   {users[rfc]?.name || rfc}
                 </MenuItem>
               ))}
 
-              {isManager && ["CAC", "Fleet", "Premium"].map((dept) => {
+              {isPepsicoManager && Object.values(users)
+                .filter(u => u.client === 'Pepsico')
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(u => (
+                  <MenuItem key={u.rfc} value={u.rfc}>
+                    {u.name}
+                  </MenuItem>
+                ))
+              }
+
+              {isManager && !isPepsicoManager && ["CAC", "Fleet", "Premium"].map((dept) => {
                 const deptAgents = Object.values(users).filter(u => u.role === 'Agent' && u.serviceDesk === dept);
                 if (deptAgents.length === 0) return null;
-                
+
                 return [
-                  <MenuItem key={`header-${dept}`} disabled sx={{ 
-                    opacity: '1 !important', 
-                    fontWeight: 800, 
-                    color: 'primary.main', 
-                    fontSize: 10, 
+                  <MenuItem key={`header-${dept}`} disabled sx={{
+                    opacity: '1 !important',
+                    fontWeight: 800,
+                    color: 'primary.main',
+                    fontSize: 10,
                     bgcolor: 'rgba(11, 160, 175, 0.1)',
                     textTransform: 'uppercase',
                     letterSpacing: 1,

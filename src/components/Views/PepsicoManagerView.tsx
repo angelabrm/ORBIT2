@@ -349,7 +349,7 @@ const PepsicoManagerView: React.FC = () => {
   const isDark  = theme.palette.mode === 'dark';
   const { users, startDate, endDate } = useAuth();
 
-  const [hierarchy, setHierarchy]             = useState<HierarchyKey>('month');
+  const [hierarchy, setHierarchy]             = useState<HierarchyKey>('day');
   const [hierarchyAnchor, setHierarchyAnchor] = useState<null | HTMLElement>(null);
   const [selectedIndicator, setSelectedIndicator] = useState<string>('Performance');
   const [brandFilter, setBrandFilter]         = useState('All');
@@ -393,34 +393,43 @@ const PepsicoManagerView: React.FC = () => {
     [teamRfcs],
   );
 
+  // ── Campaigns for selected PM only (drives Pie / Gantt / Bar when active) ─
+  const selectedPMCampaigns = useMemo(
+    () => selectedPM ? generateCampaignsForPM(selectedPM) : null,
+    [selectedPM],
+  );
+
+  // displayCampaigns = single PM when selected, otherwise full team
+  const displayCampaigns = selectedPMCampaigns ?? allCampaigns;
+
   const currentPhaseOf = (c: Campaign) =>
     c.phases.find(p => p.status !== 'Completed') || c.phases[c.phases.length - 1];
 
   const filteredCampaigns = useMemo(() =>
-    allCampaigns.filter(c => {
+    displayCampaigns.filter(c => {
       if (brandFilter !== 'All' && c.brand !== brandFilter) return false;
       if (categoryFilter !== 'All' && c.category !== categoryFilter) return false;
       if (statusFilter !== 'All' && currentPhaseOf(c).number !== statusFilter) return false;
       return true;
     }),
-    [allCampaigns, brandFilter, categoryFilter, statusFilter],
+    [displayCampaigns, brandFilter, categoryFilter, statusFilter],
   );
 
-  const totalCampaigns  = allCampaigns.length;
+  const totalCampaigns  = displayCampaigns.length;
   const filteredTotal   = filteredCampaigns.length;
-  const allBrands       = useMemo(() => Array.from(new Set(allCampaigns.map(c => c.brand))), [allCampaigns]);
+  const allBrands       = useMemo(() => Array.from(new Set(displayCampaigns.map(c => c.brand))), [displayCampaigns]);
 
-  // ── Pie: phase distribution across ALL team campaigns ────────────────────
+  // ── Pie: phase distribution (display scope) ───────────────────────────────
   const campaignsByPhase = useMemo(() =>
     PHASE_DEFS.map(def => ({
       name:  `${String(def.number).padStart(2, '0')} ${def.name}`,
-      value: allCampaigns.filter(c => currentPhaseOf(c).number === def.number).length,
+      value: displayCampaigns.filter(c => currentPhaseOf(c).number === def.number).length,
       color: def.color,
     })),
-    [allCampaigns],
+    [displayCampaigns],
   );
 
-  // ── Bar: filtered campaigns by brand ─────────────────────────────────────
+  // ── Bar: filtered campaigns by brand (display scope) ─────────────────────
   const campaignsByBrand = useMemo(() =>
     allBrands
       .map(brand => ({ brand, count: filteredCampaigns.filter(c => c.brand === brand).length }))
@@ -771,11 +780,11 @@ const PepsicoManagerView: React.FC = () => {
           >
             <Box sx={{ px: 2, pt: 1.5, pb: 0.5, flexShrink: 0, borderBottom: `1px solid ${theme.palette.divider}` }}>
               <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800 }}>
-                Campaign Gantt — Full Team
+                Campaign Gantt{selectedPMName ? ` — ${selectedPMName}` : ' — Full Team'}
               </Typography>
             </Box>
             <Box sx={{ flex: 1, minHeight: 0 }}>
-              <GanttChart campaigns={allCampaigns} brandFilter={brandFilter} categoryFilter={categoryFilter} statusFilter={statusFilter} />
+              <GanttChart campaigns={displayCampaigns} brandFilter={brandFilter} categoryFilter={categoryFilter} statusFilter={statusFilter} />
             </Box>
           </Paper>
 
@@ -789,7 +798,7 @@ const PepsicoManagerView: React.FC = () => {
             }}
           >
             <Typography variant="caption" sx={{ color: theme.palette.primary.main, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 800, mb: 0.5, display: 'block' }}>
-              Campaigns by Brand — Full Team
+              Campaigns by Brand{selectedPMName ? ` — ${selectedPMName}` : ' — Full Team'}
             </Typography>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={campaignsByBrand} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
