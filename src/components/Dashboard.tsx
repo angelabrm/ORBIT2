@@ -8,6 +8,7 @@ import AgentView from './Views/AgentView';
 import ProjectManagerView from './Views/ProjectManagerView';
 import FinancialView from './Views/FinancialView';
 import PMView from './Views/PMView';
+import PepsicoManagerView from './Views/PepsicoManagerView';
 import { useAuth } from '../context/AuthContext';
 import { Role } from '../data/mockData';
 
@@ -24,7 +25,11 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
     // Main dashboard view by role
     switch (role) {
       case 'Manager':
-      case 'Executive':
+      case 'Executive': {
+        const effectiveUser = member || user;
+        if (role === 'Manager' && effectiveUser?.client === 'Pepsico') {
+          return <PepsicoManagerView />;
+        }
         if (managementTab === 'Administrative') {
           return <AgentView member={member} />;
         }
@@ -32,6 +37,7 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
           return <FinancialView />;
         }
         return <ProjectManagerView member={member} />;
+      }
       case 'Leader':
         return <AgentView member={member} />;
       case 'PM':
