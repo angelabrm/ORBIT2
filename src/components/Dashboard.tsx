@@ -53,14 +53,16 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
       
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'all 0.5s ease-in-out' }}>
         <Header />
-        <Box sx={{ flex: 1, p: 3, overflowY: 'auto', bgcolor: 'background.default', transition: 'all 0.5s ease-in-out' }}>
+        <Box sx={{ flex: 1, p: 3, overflow: 'hidden', bgcolor: 'background.default', transition: 'all 0.5s ease-in-out', display: 'flex', flexDirection: 'column' }}>
           {selectedMember ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               {/* Member View Banner */}
-              <Box 
-                sx={{ 
-                  p: 2, 
-                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(11, 160, 175, 0.1)' : 'rgba(11, 160, 175, 0.05)', 
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  mb: 2,
+                  p: 2,
+                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(11, 160, 175, 0.1)' : 'rgba(11, 160, 175, 0.05)',
                   border: `1px solid ${theme.palette.primary.main}33`,
                   borderRadius: 2,
                   display: 'flex',
@@ -69,9 +71,9 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
                   animation: 'slide-down 0.4s ease-out'
                 }}
               >
-                <IconButton 
+                <IconButton
                   onClick={() => setSelectedMember(null)}
-                  sx={{ 
+                  sx={{
                     color: 'primary.main',
                     bgcolor: 'rgba(11, 160, 175, 0.1)',
                     '&:hover': { bgcolor: 'rgba(11, 160, 175, 0.2)' }
@@ -88,11 +90,15 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
                   </Typography>
                 </Box>
               </Box>
-              
-              {renderView(selectedMember.role, selectedMember)}
+
+              <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                {renderView(selectedMember.role, selectedMember)}
+              </Box>
             </Box>
           ) : (
-            user && renderView(user.role)
+            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', height: '100%' }}>
+              {user && renderView(user.role)}
+            </Box>
           )}
         </Box>
       </Box>
