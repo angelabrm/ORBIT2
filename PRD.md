@@ -21,7 +21,7 @@ Diseñar y documentar el dashboard corporativo ORBIT para Alta MX, que permite a
 | Cliente | Departments | Notas |
 |---------|------------|-------|
 | Stellantis | CAC, Fleet, Premium | Completamente implementado |
-| Pepsico | Pepsico (department único) | Solo presente en la pestaña Financial del Executive. Resto pendiente de implementar |
+| Pepsico | Pepsico (department único) | PM view, Manager view y Financial implementados |
 
 **Escalabilidad:** La arquitectura está diseñada para incorporar nuevos clientes y departments en el futuro sin rediseñar el modelo de acceso.
 
@@ -58,7 +58,7 @@ Los datos de usuario ya **no** existen en `mockData.ts`. Si la hoja se vuelve pr
 | **Manager** | Su cliente asignado | Visibilidad operativa de su cliente completo |
 | **Leader** | Su cliente asignado | Visibilidad del department al que pertenece |
 | **Agent** | Su cliente asignado | Visibilidad únicamente de su propia información |
-| **PM** | Pepsico (exclusivo) | Gestión de proyectos; no supervisa agentes. Vistas por definir |
+| **PM** | Pepsico (exclusivo) | Gestión de campañas publicitarias; no supervisa agentes |
 
 ---
 
@@ -72,7 +72,7 @@ Los datos de usuario ya **no** existen en `mockData.ts`. Si la hoja se vuelve pr
   - **Manager** → vista por cliente (solo su cliente).
   - **Leader** → vista por department (solo su department).
   - **Agent** → vista individual (solo sus propios datos).
-  - **PM** → pendiente de definir (exclusivo Pepsico, sin acceso a datos de Stellantis).
+  - **PM** → vista individual de campañas (exclusivo Pepsico, sin acceso a datos de Stellantis).
 
 ### 5.2 Aislamiento por cliente
 
@@ -184,13 +184,14 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 
 - Roles Agent, Leader, Manager, Executive, PM con sus vistas correspondientes
 - Tabs Operational / Administrative / Financial con control de acceso por rol
-- Drilling: clic en barra de gráfico → vista de Leader; dropdown → vista de Agent
+- Drilling: clic en barra de gráfico → vista de Leader; dropdown → vista de Agent/PM
 - **Integración en tiempo real con Google Sheets** vía CSV público (`/api/roster`, `/api/login`) con caché de 5 minutos
-- Sidebar oculta tabs de management y dropdown de miembros cuando el usuario es PM
+- Sidebar oculta tabs de management y dropdown de miembros cuando el usuario es PM; Pepsico Manager no ve tabs Operational/Administrative y su dropdown muestra solo miembros Pepsico
 - Cliente Stellantis con departments CAC, Fleet, Premium
-- Manager de Pepsico con su vista operativa
+- **Vista PM** con KPIs (Performance + Ranking con cuartil), gráfico de tendencias, Gantt jerárquico y gráficos auxiliares; acepta prop `member` para "ver como" desde el Manager
+- **Vista Manager Pepsico** (`PepsicoManagerView.tsx`) con KPI "Avg. Team Performance", ranking interactivo Q1–Q4, gráfico de tendencias (Team Average + overlay individual), Pie por fase, Gantt y Bar por Brand; selección en ranking filtra Pie/Gantt/Bar al PM seleccionado
+- Capa de datos mock Pepsico centralizada en `pepsicoMockData.ts` — seeded por RFC, garantiza consistencia entre PMView y PepsicoManagerView
 - Pestaña Financial del Executive con datos de Stellantis y Pepsico
-- **Vista PM** con KPIs (Performance + Ranking con cuartil), gráfico de tendencias, Gantt jerárquico y gráficos auxiliares (datos mock)
 - Backend Express con endpoint de casos abiertos (Neon PostgreSQL)
 - Despliegue en Vercel con `api/index.ts` como serverless function
 - Aislamiento de sesión al cerrar
@@ -200,9 +201,7 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 | Item | Descripción |
 |------|-------------|
 | `ExecutiveView` activa | Conectar `ExecutiveView.tsx` al routing de `Dashboard.tsx` |
-| Fuente de datos campañas Pepsico | Reemplazar el mock de campañas en `PMView.tsx` con la fuente real (fases, tasks, fechas, estados) |
-| Vista Manager Pepsico | Drill-down del Manager hacia el rendimiento individual de cada PM |
-| Vistas operativas de Pepsico | Datos operativos del equipo Pepsico más allá del Financial y PM |
+| Fuente de datos campañas Pepsico | Reemplazar el mock de campañas con la fuente real (fases, tasks, fechas, estados) |
 | Control de acceso backend | Validación de rol/cliente en endpoints de la API |
 
 ---
@@ -321,18 +320,31 @@ Tres niveles horizontales apilados verticalmente:
 
 Pendiente: reemplazar el mock por datos reales y validar las fórmulas finales de Performance, Ranking y QA Rate con el equipo Pepsico.
 
-### Vista Manager (equipo Pepsico) — pendiente
+### Vista Manager Pepsico (`PepsicoManagerView.tsx`) — implementada
 
-- Rendimiento general del equipo de PMs
-- Drill-down a la vista individual de cada PM (mismo mecanismo que en Stellantis: dropdown en Sidebar)
+**Layout** (tres filas verticales):
+
+| Fila | Altura | Contenido |
+|------|--------|-----------|
+| 1 | 30% | KPI "Avg. Team Performance" (30%) + Ranking de equipo Q1–Q4 (70%) |
+| 2 | 28% | Gráfico de líneas de tendencias (60%) + Pie chart Campaign Distribution by Status (40%) |
+| 3 | resto | Filtros + Gantt (50%) + Campaigns by Brand bar chart (50%) |
+
+**Ranking de equipo:** lista ordenada de PMs con su Performance individual y cuartil (Q1–Q4 por posición relativa). Clic en un PM filtra Pie, Gantt y Bar a solo ese PM; segundo clic restaura vista de equipo completo.
+
+**Gráfico de líneas:** muestra siempre "Team Average". Si hay un PM seleccionado, agrega una línea punteada con sus datos individuales. Jerarquía temporal por defecto: Days.
+
+**Datos:** compartidos con `PMView.tsx` vía `pepsicoMockData.ts` — los valores de Performance del ranking son idénticos a los que ve cada PM en su propio dashboard.
+
+**Sidebar:** sin tabs Operational/Administrative; dropdown muestra solo miembros Pepsico (todos los roles). Seleccionar un miembro activa el banner "You're seeing X Dashboard" y renderiza `PMView` con el RFC del PM seleccionado.
 
 ### Fuente de datos
 
-Los datos de campañas (nombres, fechas, fases, tasks, estados) provienen de una fuente externa aún por definir, separada del Roster de Google Sheets. La implementación actual usa un mock interno en `PMView.tsx`.
+Los datos de campañas (nombres, fechas, fases, tasks, estados) provienen de una fuente externa aún por definir, separada del Roster de Google Sheets. La implementación actual usa `pepsicoMockData.ts` (mock seeded por RFC, compartido entre PMView y PepsicoManagerView).
 
 ### Jerarquía de acceso Pepsico
 
 | Rol | Alcance |
 |-----|---------|
 | PM | Ve únicamente sus propias campañas y métricas |
-| Manager | Ve el rendimiento general del equipo y puede navegar a la vista individual de cada PM |
+| Manager | Ve rendimiento agregado del equipo; puede navegar a la vista individual de cualquier PM vía dropdown del Sidebar |

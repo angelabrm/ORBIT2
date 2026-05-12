@@ -54,18 +54,23 @@ The Roster is fetched from Google Sheets via the public CSV export URL (`gviz/tq
 src/
 ├── context/AuthContext.tsx   Global state: user, users (RFC→User map), selectedMember, managementTab, dateRange
 ├── services/apiService.ts    fetchOpenedCases(), checkApiHealth()
-├── data/mockData.ts          METRICS_DATA + getFilteredMetrics() + generateHistoricalData() (no user data here)
+├── data/
+│   ├── mockData.ts           METRICS_DATA + getFilteredMetrics() + generateHistoricalData() (no user data)
+│   └── pepsicoMockData.ts    Shared Pepsico mock layer: generateCampaignsForPM, generatePMMetrics,
+│                             buildPMTrendData, buildTeamAvgTrendData — all RFC-seeded deterministic
 └── components/
     ├── App.tsx               ThemeProvider + AuthProvider + Login/Dashboard
-    ├── Dashboard.tsx         Role dispatch → View
-    ├── Sidebar.tsx           Date pickers, management tabs, member dropdown (all hidden for PM)
+    ├── Dashboard.tsx         Role dispatch → View; member wrapper uses flex:1/minHeight:0 so
+    │                         percentage-height rows in PMView resolve to real pixels
+    ├── Sidebar.tsx           Date pickers, management tabs, member dropdown
     ├── Login.tsx             RFC entry, async login via /api/login
     └── Views/
-        ├── AgentView.tsx           Agent/Leader (largest, ~1900 lines)
-        ├── ProjectManagerView.tsx  Manager/Executive operational + admin tabs
-        ├── FinancialView.tsx       Executive only
-        ├── ExecutiveView.tsx       Exists, NOT yet wired into Dashboard routing
-        └── PMView.tsx              Pepsico PM — KPIs, trend chart, Gantt
+        ├── AgentView.tsx              Agent/Leader (~1900 lines)
+        ├── ProjectManagerView.tsx     Manager/Executive operational + admin tabs (Stellantis)
+        ├── FinancialView.tsx          Executive only
+        ├── ExecutiveView.tsx          Exists, NOT yet wired into Dashboard routing
+        ├── PMView.tsx                 Pepsico PM — accepts member? prop for "view as"
+        └── PepsicoManagerView.tsx     Pepsico Manager — team ranking, avg KPI, aggregated charts
 ```
 
 ### Conventions
