@@ -9,6 +9,7 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 interface RosterUser {
   rfc: string;
+  compass?: string;
   name: string;
   role: string;
   client: string;
@@ -75,11 +76,12 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
   const headers = rows[0].map(h => h.trim());
   const col = (name: string) => headers.indexOf(name);
 
-  const docCol = col('Documento');
-  const nombreCol = col('Nombre');
-  const nivelCol = col('Nivel');
-  const mesaCol = col('MESA_');
-  const clientCol = col('Client');
+  const docCol     = col('Documento');
+  const compassCol = col('Compass');
+  const nombreCol  = col('Nombre');
+  const nivelCol   = col('Nivel');
+  const mesaCol    = col('MESA_');
+  const clientCol  = col('Client');
 
   console.log('[Roster] Headers:', JSON.stringify(headers));
 
@@ -88,13 +90,14 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
     .filter(row => row[docCol]?.trim() && row[nivelCol]?.trim())
     .map(row => {
       const rfc = row[docCol]?.trim().toUpperCase();
+      const compass = compassCol >= 0 ? (row[compassCol]?.trim() || undefined) : undefined;
       const nombre = row[nombreCol]?.trim() || '';
       const nivel = row[nivelCol]?.trim() || '';
       const mesa = row[mesaCol]?.trim() || '';
       const clientVal = row[clientCol]?.trim() || '';
       const role = mapRole(nivel);
       if (!role || !rfc) return null;
-      return { rfc, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
+      return { rfc, compass, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
     })
     .filter(Boolean) as RosterUser[];
 

@@ -7,6 +7,7 @@ export type ServiceDesk = "CAC" | "Fleet" | "Premium" | "Manager" | "Executive" 
 
 export interface User {
   rfc: string;
+  compass?: string; // Compass ID — matches case_owner in Abiertos table
   name: string;
   role: Role;
   client: "Stellantis" | "Pepsico";

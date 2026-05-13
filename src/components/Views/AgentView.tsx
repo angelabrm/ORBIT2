@@ -523,16 +523,19 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const loadDbData = async () => {
       if (!currentUser) return;
       
-      let rfcsToFetch: string[] = [];
+      // Compass IDs are used as case_owner in the Abiertos table (Roster[Compass] = Abiertos[case_owner])
+      let compassIds: string[] = [];
       if (currentUser.role === "Agent") {
-        rfcsToFetch = [currentUser.rfc];
+        if (currentUser.compass) compassIds = [currentUser.compass];
       } else if (isManagement) {
-        rfcsToFetch = teamRfcs;
+        compassIds = teamRfcs
+          .map(rfc => users[rfc]?.compass)
+          .filter((c): c is string => !!c);
       }
 
-      if (rfcsToFetch.length > 0) {
+      if (compassIds.length > 0) {
         const cases = await fetchOpenedCases(undefined, startDate, endDate);
-        const filteredCases = cases.filter(c => rfcsToFetch.includes(c.case_owner));
+        const filteredCases = cases.filter(c => compassIds.includes(c.case_owner));
         setDbOpenedCases(filteredCases.length);
       } else {
         setDbOpenedCases(null);
