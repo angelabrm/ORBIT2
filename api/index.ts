@@ -1,5 +1,5 @@
 import express from 'express';
-import { Pool } from 'pg';
+import { neon } from '@neondatabase/serverless';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 
@@ -9,12 +9,7 @@ const app = express();
 app.use(express.json());
 
 const dbUrl = process.env.DATABASE_URL || process.env.NEON_DB_URL;
-let pool: Pool | null = null;
-try {
-  if (dbUrl) pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-} catch (e) {
-  console.error('[DB] Pool init failed:', e);
-}
+const sql = dbUrl ? neon(dbUrl) : null;
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID || '122mX8Jh0w5HP7JwW21mKHTDN2h0YhQuQYHhumHAcm4s';
 const SHEET_NAME = 'Roster';
@@ -166,21 +161,19 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/opened-cases', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  if (!sql) return res.status(503).json({ error: 'Database not configured' });
   try {
     const { case_owner, startDate, endDate } = req.query;
-    let query = 'SELECT * FROM "Abiertos"';
-    const params: any[] = [];
+    let rows: any[];
     if (case_owner) {
-      query += ' WHERE "case_owner" = $1';
-      params.push(case_owner);
+      rows = await sql`SELECT * FROM "Abiertos" WHERE "case_owner" = ${case_owner as string}`;
+    } else {
+      rows = await sql`SELECT * FROM "Abiertos"`;
     }
-    const result = await pool.query(query, params);
-    let data = result.rows;
     if (startDate || endDate) {
       const start = startDate ? dayjs(startDate as string) : null;
       const end   = endDate   ? dayjs(endDate   as string) : null;
-      data = data.filter(row => {
+      rows = rows.filter(row => {
         const openedAt = dayjs(row.datetime_opened, 'M/D/YYYY h:mm A');
         if (!openedAt.isValid()) return false;
         if (start && openedAt.isBefore(start, 'day')) return false;
@@ -188,7 +181,7 @@ app.get('/api/opened-cases', async (req, res) => {
         return true;
       });
     }
-    res.json(data);
+    res.json(rows);
   } catch (error: any) {
     console.error('[opened-cases] error:', error?.message);
     res.status(500).json({ error: 'Failed to fetch data' });
@@ -196,7 +189,7 @@ app.get('/api/opened-cases', async (req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', databaseConnected: !!pool });
+  res.json({ status: 'ok', databaseConnected: !!sql });
 });
 
 export default app;
