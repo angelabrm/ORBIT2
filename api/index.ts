@@ -1,19 +1,20 @@
 import express from 'express';
-import pg from 'pg';
+import { Pool } from 'pg';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 
 dayjs.extend(customParseFormat);
 
-const { Pool } = pg;
-
 const app = express();
 app.use(express.json());
 
 const dbUrl = process.env.DATABASE_URL || process.env.NEON_DB_URL;
-const pool = dbUrl
-  ? new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } })
-  : null;
+let pool: Pool | null = null;
+try {
+  if (dbUrl) pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+} catch (e) {
+  console.error('[DB] Pool init failed:', e);
+}
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID || '122mX8Jh0w5HP7JwW21mKHTDN2h0YhQuQYHhumHAcm4s';
 const SHEET_NAME = 'Roster';
