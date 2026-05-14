@@ -1,5 +1,4 @@
 import express from 'express';
-import { neon } from '@neondatabase/serverless';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 
@@ -8,8 +7,17 @@ dayjs.extend(customParseFormat);
 const app = express();
 app.use(express.json());
 
+// Lazy-load neon only when /api/opened-cases is hit, to avoid any
+// module-load-time failure preventing the whole function from booting.
 const dbUrl = process.env.DATABASE_URL || process.env.NEON_DB_URL;
-const sql = dbUrl ? neon(dbUrl) : null;
+let sqlPromise: Promise<ReturnType<typeof import('@neondatabase/serverless').neon> | null> | null = null;
+function getSql() {
+  if (!dbUrl) return Promise.resolve(null);
+  if (!sqlPromise) {
+    sqlPromise = import('@neondatabase/serverless').then(m => m.neon(dbUrl));
+  }
+  return sqlPromise;
+}
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID || '122mX8Jh0w5HP7JwW21mKHTDN2h0YhQuQYHhumHAcm4s';
 const SHEET_NAME = 'Roster';
@@ -161,6 +169,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/opened-cases', async (req, res) => {
+  const sql = await getSql();
   if (!sql) return res.status(503).json({ error: 'Database not configured' });
   try {
     const { case_owner, startDate, endDate } = req.query;
@@ -189,7 +198,7 @@ app.get('/api/opened-cases', async (req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', databaseConnected: !!sql });
+  res.json({ status: 'ok', dbConfigured: !!dbUrl });
 });
 
 export default app;
