@@ -3,6 +3,39 @@ import express from 'express';
 const app = express();
 app.use(express.json());
 
+const dbUrl = process.env.DATABASE_URL || process.env.NEON_DB_URL;
+
+// Lazy pg pool — only instantiated when /api/opened-cases is first called.
+// Keeping pg out of the module-load path avoids any bundling/ESM issues
+// that would crash the whole serverless function on cold start.
+let poolPromise: Promise<any> | null = null;
+function getPool(): Promise<any> {
+  if (!dbUrl) return Promise.resolve(null);
+  if (!poolPromise) {
+    poolPromise = import('pg').then((pgMod: any) => {
+      const Pool = pgMod.Pool || pgMod.default?.Pool;
+      return new Pool({
+        connectionString: dbUrl,
+        ssl: { rejectUnauthorized: false },
+        max: 1,
+      });
+    });
+  }
+  return poolPromise;
+}
+
+// Parse "M/D/YYYY h:mm A" without dayjs (which we keep out of module load).
+function parseOpenedAt(s: string): number | null {
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  let h = parseInt(m[4], 10);
+  const ampm = m[6].toUpperCase();
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return Date.UTC(parseInt(m[3], 10), parseInt(m[1], 10) - 1, parseInt(m[2], 10), h, parseInt(m[5], 10));
+}
+
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID || '122mX8Jh0w5HP7JwW21mKHTDN2h0YhQuQYHhumHAcm4s';
 const SHEET_NAME = 'Roster';
 const CACHE_TTL = 5 * 60 * 1000;
@@ -149,9 +182,39 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-app.get('/api/opened-cases', (_req, res) => {
-  // Temporarily disabled while we re-introduce DB access in a Vercel-safe way.
-  res.status(503).json({ error: 'Opened-cases endpoint temporarily unavailable on Vercel' });
+app.get('/api/opened-cases', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+
+    const { case_owner, startDate, endDate } = req.query as { case_owner?: string; startDate?: string; endDate?: string };
+
+    let rows: any[];
+    if (case_owner) {
+      const r = await pool.query('SELECT * FROM "Abiertos" WHERE "case_owner" = $1', [case_owner]);
+      rows = r.rows;
+    } else {
+      const r = await pool.query('SELECT * FROM "Abiertos"');
+      rows = r.rows;
+    }
+
+    if (startDate || endDate) {
+      const start = startDate ? Date.parse(startDate) : null;
+      const end   = endDate   ? Date.parse(endDate)   : null;
+      rows = rows.filter(row => {
+        const t = parseOpenedAt(row.datetime_opened);
+        if (t === null) return false;
+        if (start !== null && t < start - 86400000) return false; // day-inclusive
+        if (end   !== null && t > end   + 86400000) return false;
+        return true;
+      });
+    }
+
+    res.json(rows);
+  } catch (error: any) {
+    console.error('[opened-cases] error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch data', detail: error?.message });
+  }
 });
 
 app.get('/api/health', (_req, res) => {
