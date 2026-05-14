@@ -490,7 +490,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const [adminViewType, setAdminViewType] = React.useState<'personal' | 'team'>(
     currentUser?.role === 'Executive' ? 'team' : 'personal'
   );
-  const [dbOpenedCases, setDbOpenedCases] = React.useState<number | null>(null);
+  // Real cases from Neon (filtered to this user/team's compass IDs)
+  const [dbCases, setDbCases] = React.useState<any[] | null>(null);
+  const dbOpenedCases = dbCases?.length ?? null;
   const [selectedDept, setSelectedDept] = React.useState<string>('All');
 
   // Team calculations for Management - moved up for dependency access
@@ -536,9 +538,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       if (compassIds.length > 0) {
         const cases = await fetchOpenedCases(undefined, startDate, endDate);
         const filteredCases = cases.filter(c => compassIds.includes(c.case_owner));
-        setDbOpenedCases(filteredCases.length);
+        setDbCases(filteredCases);
       } else {
-        setDbOpenedCases(null);
+        setDbCases(null);
       }
     };
     loadDbData();
@@ -595,7 +597,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       baseStats.openedCases = dbOpenedCases;
     }
     return baseStats;
-  }, [currentUser, startDate, endDate, dbOpenedCases, teamRfcs, isManagement]);
+  }, [currentUser, startDate, endDate, dbCases, teamRfcs, isManagement]);
 
   // Derived calculations for standard agent (move to top level hooks)
   const calcResults = React.useMemo(() => {
@@ -656,10 +658,49 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Historical data for this user
   const rawHistoricalData = React.useMemo(() => currentUser ? generateHistoricalData(currentUser.rfc) : [], [currentUser]);
 
+  // Indicators that are now sourced from the Neon DB instead of mock data.
+  // As more tables become available in Neon, add their indicator names here.
+  const DB_INDICATORS = React.useMemo(() => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate']), []);
+
+  // Bucket the real cases by the same hierarchy keys used below ('YYYY-MM-DD', 'YYYY-MM', etc.)
+  // For each bucket compute opened (by datetime_opened), closed (by datetime_closed) and rate.
+  const dbTrendByBucket = React.useMemo(() => {
+    const out: Record<string, { 'Opened Cases': number; 'Closed Cases': number; 'Closed Cases Rate': number }> = {};
+    if (!dbCases || dbCases.length === 0) return out;
+    const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
+                     hierarchy === 'week' ? 'YYYY-ww' :
+                     hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
+    const FMT = 'M/D/YYYY h:mm A';
+
+    const ensure = (k: string) => {
+      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0 };
+      return out[k];
+    };
+
+    dbCases.forEach(c => {
+      const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+      if (opened && opened.isValid() && opened.isBetween(startDate, endDate, 'day', '[]')) {
+        ensure(opened.format(formatStr))['Opened Cases']++;
+      }
+      const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+      if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
+        ensure(closed.format(formatStr))['Closed Cases']++;
+      }
+    });
+
+    Object.values(out).forEach(b => {
+      b['Closed Cases Rate'] = b['Opened Cases'] > 0
+        ? Number(((b['Closed Cases'] / b['Opened Cases']) * 100).toFixed(1))
+        : 0;
+    });
+
+    return out;
+  }, [dbCases, hierarchy, startDate, endDate]);
+
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
     // 1. Filter by start and end date
-    const filtered = rawHistoricalData.filter(d => 
+    const filtered = rawHistoricalData.filter(d =>
       dayjs(d.date).isBetween(startDate, endDate, 'day', '[]')
     );
 
@@ -667,8 +708,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
     // 2. Aggregate by hierarchy
     const groups: Record<string, any[]> = {};
-    const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' : 
-                     hierarchy === 'week' ? 'YYYY-ww' : 
+    const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
+                     hierarchy === 'week' ? 'YYYY-ww' :
                      hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
 
     filtered.forEach(d => {
@@ -677,22 +718,35 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       groups[key].push(d);
     });
 
+    // Merge in any DB buckets that don't have a corresponding mock bucket
+    Object.keys(dbTrendByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+
     return Object.entries(groups).map(([key, items]) => {
-      const entry: any = { 
-        name: key, 
-        fullDate: items[0].date,
-        count: items.length 
+      const entry: any = {
+        name: key,
+        fullDate: items[0]?.date || key,
+        count: items.length
       };
-      
+
       selectedIndicators.forEach(indicator => {
+        // DB-backed indicator: pull straight from the bucketed real data
+        if (DB_INDICATORS.has(indicator)) {
+          entry[indicator] = dbTrendByBucket[key]?.[indicator as keyof typeof dbTrendByBucket[string]] ?? 0;
+          return;
+        }
+        // Mock-backed indicator: same averaging as before
+        if (items.length === 0) {
+          entry[indicator] = 0;
+          return;
+        }
         const sum = items.reduce((acc, item) => acc + (item[indicator] || 0), 0);
-        const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(indicator);
+        const isInt = ['NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(indicator);
         entry[indicator] = isInt ? Math.round(sum / items.length) : Number((sum / items.length).toFixed(1));
       });
-      
+
       return entry;
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [rawHistoricalData, startDate, endDate, hierarchy, selectedIndicators]);
+  }, [rawHistoricalData, startDate, endDate, hierarchy, selectedIndicators, dbTrendByBucket, DB_INDICATORS]);
 
   // Administrative Management Logic
   const allDays = React.useMemo(() => {
