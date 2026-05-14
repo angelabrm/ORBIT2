@@ -193,7 +193,9 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 - Capa de datos mock Pepsico centralizada en `pepsicoMockData.ts` — seeded por RFC, garantiza consistencia entre PMView y PepsicoManagerView
 - Pestaña Financial del Executive con datos de Stellantis y Pepsico
 - Backend Express con endpoint de casos abiertos (Neon PostgreSQL)
-- Despliegue en Vercel con `api/index.ts` como serverless function
+- **Migración progresiva mock → Neon (Fase 1, Stellantis):** los indicadores `Opened Cases`, `Closed Cases` y `Closed Cases Rate` en el line chart de `AgentView` ahora se calculan desde la tabla `Abiertos` agrupando por la jerarquía temporal seleccionada (día/semana/mes/año). El cruce se hace por `case_owner` ↔ `Compass` del Roster. El KPI individual de Opened Cases ya consumía BD; ahora la serie temporal también
+- Despliegue en Vercel con `api/index.ts` como serverless function en `orbit-2-weld.vercel.app`. `engines.node` pineado a `22.x`, `@neondatabase/serverless` eliminado del path de cold start, `pg` y `dayjs` cargados lazy desde dentro de los handlers
+- Rango de fechas default del dashboard: últimos 12 meses rolling (`dayjs().subtract(12, 'month').startOf('month')` → `dayjs()`), garantiza que los datos reales de BD entren en ventana al cargar
 - Aislamiento de sesión al cerrar
 
 ### Pendiente de implementar
@@ -203,6 +205,10 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 | `ExecutiveView` activa | Conectar `ExecutiveView.tsx` al routing de `Dashboard.tsx` |
 | Fuente de datos campañas Pepsico | Reemplazar el mock de campañas con la fuente real (fases, tasks, fechas, estados) |
 | Control de acceso backend | Validación de rol/cliente en endpoints de la API |
+| Migración mock → Neon (Fase 2+) | Mover el resto de indicadores Stellantis del line chart (Performance, Productivity, Ranking, Bonus, NSAT Information, NSAT Claims, Incoming/Outgoing Calls, % FCR, Backlog Team) a tablas reales en Neon. Cada nuevo indicador se activa agregándolo al `Set DB_INDICATORS` en `AgentView.tsx` y extendiendo `dbTrendByBucket` con la agregación correspondiente. Misma técnica aplica para los KPIs cards superiores |
+| Compass mapping completo en Roster | 31 filas del Google Sheet aún tienen nombre real en la columna `Compass` en vez de `User X`. Esos usuarios no recibirán datos de Neon hasta que se les mapee al identificador correcto. Lista exacta documentada en el historial de commits |
+| Bug `ProjectManagerView.tsx:93` | Filtra cases por `rfcs.includes(c.case_owner)` pero `case_owner` es Compass, no RFC. Mismo bug ya corregido en `AgentView.tsx` |
+| Day-inclusive margin en `/api/opened-cases` | El backend agrega ±1 día al filtro de fechas (línea `t < start - 86400000`). Si el usuario pone start=end=15-Abr-2026 devuelve casos del 14, 15 y 16. Útil como tolerancia de timezone pero impreciso |
 
 ---
 

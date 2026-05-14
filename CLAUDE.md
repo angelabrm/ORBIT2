@@ -35,7 +35,13 @@ React 19 + Vite frontend, Express 4 backend. Two parallel server entry points sh
 | `server.ts` | Local dev (`npm run dev`) — Express with Vite middleware, full HMR |
 | `api/index.ts` | Vercel production — same Express app exported as a serverless function |
 
-`vercel.json` rewrites `/api/*` → `/api/index` and everything else → `/index.html`.
+`vercel.json` rewrites `/api/*` → `/api/index` and everything else → `/index.html`. `engines.node` is pinned to `22.x` in `package.json` (Node 24 broke the bundle).
+
+**Vercel function landmines** — `api/index.ts` is a single-file Express handler. Some things will silently crash the cold start (FUNCTION_INVOCATION_FAILED with no log line) unless you keep them out of the module-load path:
+- `@neondatabase/serverless` cannot be imported at module scope (not even via `typeof import(...)` in a type position). Removed entirely.
+- `pg` is dynamically imported inside `getPool()` — never at the top of the file.
+- `dayjs` parsing is also kept lazy; the file has its own `parseOpenedAt()` regex to avoid pulling `dayjs/plugin/customParseFormat` into the cold start.
+- If you add a new DB library or heavy package, follow the same pattern: import it inside the handler that needs it, not at module top.
 
 ### Endpoints
 
@@ -95,3 +101,11 @@ src/
 ## Working with Roster data
 
 User data is **never** hardcoded. `MOCK_USERS` no longer exists. Components read users from `useAuth().users` (RFC→User map populated from `/api/roster` on mount). When adding a feature that needs to look up a user by RFC, by role, or by serviceDesk, use `Object.values(users).find(...)` — don't reach for a static map.
+
+## Progressive migration: mock → Neon
+
+The Stellantis trend chart in `AgentView.tsx` is moving from synthetic `generateHistoricalData(rfc)` mock to real (anonymized) Neon data. The `DB_INDICATORS` Set inside the component is the extension point — indicators listed there are pulled from `dbTrendByBucket` (computed by bucketing the rows returned from `/api/opened-cases` into the chart's hierarchy keys); everything else stays on mock until its source table exists.
+
+Currently sourced from Neon: `Opened Cases`, `Closed Cases`, `Closed Cases Rate`. To add another (e.g. NSAT), include it in `DB_INDICATORS` and extend the per-bucket aggregation alongside the existing fields.
+
+`case_owner` in `Abiertos` joins to `users[rfc].compass` — the `Compass` column in the Google Sheet must hold the same identifier used in the DB (e.g. `User 24`). Users without a matching `Compass` value will correctly show 0 cases.
