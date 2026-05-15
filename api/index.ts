@@ -43,6 +43,7 @@ const CACHE_TTL = 5 * 60 * 1000;
 interface RosterUser {
   rfc: string;
   compass?: string;
+  callPicker?: string;
   name: string;
   role: string;
   client: string;
@@ -109,26 +110,28 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
   const headers = rows[0].map(h => h.trim());
   const col = (name: string) => headers.indexOf(name);
 
-  const docCol     = col('Documento');
-  const compassCol = col('Compass');
-  const nombreCol  = col('Nombre');
-  const nivelCol   = col('Nivel');
-  const mesaCol    = col('MESA_');
-  const clientCol  = col('Client');
+  const docCol        = col('Documento');
+  const compassCol    = col('Compass');
+  const callPickerCol = col('CallPicker');
+  const nombreCol     = col('Nombre');
+  const nivelCol      = col('Nivel');
+  const mesaCol       = col('MESA_');
+  const clientCol     = col('Client');
 
   const users: RosterUser[] = rows
     .slice(1)
     .filter(row => row[docCol]?.trim() && row[nivelCol]?.trim())
     .map(row => {
       const rfc = row[docCol]?.trim().toUpperCase();
-      const compass = compassCol >= 0 ? (row[compassCol]?.trim() || undefined) : undefined;
+      const compass    = compassCol    >= 0 ? (row[compassCol]?.trim()    || undefined) : undefined;
+      const callPicker = callPickerCol >= 0 ? (row[callPickerCol]?.trim() || undefined) : undefined;
       const nombre = row[nombreCol]?.trim() || '';
       const nivel = row[nivelCol]?.trim() || '';
       const mesa = row[mesaCol]?.trim() || '';
       const clientVal = row[clientCol]?.trim() || '';
       const role = mapRole(nivel);
       if (!role || !rfc) return null;
-      return { rfc, compass, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
+      return { rfc, compass, callPicker, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
     })
     .filter(Boolean) as RosterUser[];
 
@@ -214,6 +217,72 @@ app.get('/api/opened-cases', async (req, res) => {
   } catch (error: any) {
     console.error('[opened-cases] error:', error?.message);
     res.status(500).json({ error: 'Failed to fetch data', detail: error?.message });
+  }
+});
+
+// Parse "Actividad_YYYY_MM_DD.csv" → ms-since-epoch UTC, or null if format unknown.
+function parseSourceName(s: string): number | null {
+  if (!s) return null;
+  const m = s.match(/Actividad_(\d{4})_(\d{2})_(\d{2})\.csv$/i);
+  if (!m) return null;
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10) - 1;
+  const day = parseInt(m[3], 10);
+  return Date.UTC(year, month, day);
+}
+
+app.get('/api/incoming-calls', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+
+    const { user, startDate, endDate } = req.query as { user?: string; startDate?: string; endDate?: string };
+
+    // user is a CSV of CallPicker values. Build a parameterised IN clause.
+    const userList = (user || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    let rows: any[];
+    if (userList.length > 0) {
+      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
+      const r = await pool.query(
+        `SELECT "User", "Answered Calls", "Source.Name" FROM "Actividad" WHERE "User" IN (${placeholders})`,
+        userList,
+      );
+      rows = r.rows;
+    } else {
+      const r = await pool.query('SELECT "User", "Answered Calls", "Source.Name" FROM "Actividad"');
+      rows = r.rows;
+    }
+
+    // Attach parsed date + filter by range (day-inclusive, same convention as /api/opened-cases).
+    const start = startDate ? Date.parse(startDate) : null;
+    const end   = endDate   ? Date.parse(endDate)   : null;
+
+    const out = rows
+      .map(r => {
+        const t = parseSourceName(r['Source.Name']);
+        if (t === null) return null;
+        return {
+          user: r['User'],
+          date: r['Source.Name'],
+          dateMs: t,
+          answeredCalls: Number(r['Answered Calls']) || 0,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .filter(r => {
+        if (start !== null && r.dateMs < start - 86400000) return false;
+        if (end   !== null && r.dateMs > end   + 86400000) return false;
+        return true;
+      });
+
+    res.json(out);
+  } catch (error: any) {
+    console.error('[incoming-calls] error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch activity', detail: error?.message });
   }
 });
 

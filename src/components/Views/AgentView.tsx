@@ -20,7 +20,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
-import { fetchOpenedCases } from '../../services/apiService';
+import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
@@ -493,6 +493,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Real cases from Neon (filtered to this user/team's compass IDs)
   const [dbCases, setDbCases] = React.useState<any[] | null>(null);
   const dbOpenedCases = dbCases?.length ?? null;
+
+  // Real Actividad rows from Neon, filtered to this user/team's CallPicker IDs
+  const [dbActivity, setDbActivity] = React.useState<IncomingCallRow[] | null>(null);
   const [selectedDept, setSelectedDept] = React.useState<string>('All');
 
   // Team calculations for Management - moved up for dependency access
@@ -524,23 +527,32 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   React.useEffect(() => {
     const loadDbData = async () => {
       if (!currentUser) return;
-      
-      // Compass IDs are used as case_owner in the Abiertos table (Roster[Compass] = Abiertos[case_owner])
+
+      // Compass IDs join Abiertos.case_owner (cases). CallPicker IDs join Actividad.User (calls).
       let compassIds: string[] = [];
-      if (currentUser.role === "Agent") {
-        if (currentUser.compass) compassIds = [currentUser.compass];
+      let callPickerIds: string[] = [];
+      if (currentUser.role === 'Agent') {
+        if (currentUser.compass)    compassIds    = [currentUser.compass];
+        if (currentUser.callPicker) callPickerIds = [currentUser.callPicker];
       } else if (isManagement) {
-        compassIds = teamRfcs
-          .map(rfc => users[rfc]?.compass)
-          .filter((c): c is string => !!c);
+        compassIds    = teamRfcs.map(rfc => users[rfc]?.compass   ).filter((c): c is string => !!c);
+        callPickerIds = teamRfcs.map(rfc => users[rfc]?.callPicker).filter((c): c is string => !!c);
       }
 
+      // Opened/Closed cases via Abiertos
       if (compassIds.length > 0) {
         const cases = await fetchOpenedCases(undefined, startDate, endDate);
-        const filteredCases = cases.filter(c => compassIds.includes(c.case_owner));
-        setDbCases(filteredCases);
+        setDbCases(cases.filter(c => compassIds.includes(c.case_owner)));
       } else {
         setDbCases(null);
+      }
+
+      // Incoming calls via Actividad
+      if (callPickerIds.length > 0) {
+        const activity = await fetchIncomingCalls(callPickerIds, startDate, endDate);
+        setDbActivity(activity);
+      } else {
+        setDbActivity(null);
       }
     };
     loadDbData();
@@ -660,42 +672,62 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
-  const DB_INDICATORS = React.useMemo(() => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate']), []);
+  const DB_INDICATORS = React.useMemo(
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls']),
+    []
+  );
 
-  // Bucket the real cases by the same hierarchy keys used below ('YYYY-MM-DD', 'YYYY-MM', etc.)
-  // For each bucket compute opened (by datetime_opened), closed (by datetime_closed) and rate.
+  // Bucket the real cases + activity by the same hierarchy keys used below ('YYYY-MM-DD', 'YYYY-MM', etc.)
+  // Cases contribute Opened/Closed/Rate; activity rows contribute Incoming Calls (SUM of "Answered Calls").
   const dbTrendByBucket = React.useMemo(() => {
-    const out: Record<string, { 'Opened Cases': number; 'Closed Cases': number; 'Closed Cases Rate': number }> = {};
-    if (!dbCases || dbCases.length === 0) return out;
+    type Bucket = {
+      'Opened Cases': number;
+      'Closed Cases': number;
+      'Closed Cases Rate': number;
+      'Incoming Calls': number;
+    };
+    const out: Record<string, Bucket> = {};
     const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
                      hierarchy === 'week' ? 'YYYY-ww' :
                      hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
     const FMT = 'M/D/YYYY h:mm A';
 
-    const ensure = (k: string) => {
-      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0 };
+    const ensure = (k: string): Bucket => {
+      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0 };
       return out[k];
     };
 
-    dbCases.forEach(c => {
-      const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
-      if (opened && opened.isValid() && opened.isBetween(startDate, endDate, 'day', '[]')) {
-        ensure(opened.format(formatStr))['Opened Cases']++;
-      }
-      const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-      if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
-        ensure(closed.format(formatStr))['Closed Cases']++;
-      }
-    });
+    // Abiertos → Opened/Closed counts per bucket
+    if (dbCases) {
+      dbCases.forEach(c => {
+        const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+        if (opened && opened.isValid() && opened.isBetween(startDate, endDate, 'day', '[]')) {
+          ensure(opened.format(formatStr))['Opened Cases']++;
+        }
+        const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+        if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
+          ensure(closed.format(formatStr))['Closed Cases']++;
+        }
+      });
 
-    Object.values(out).forEach(b => {
-      b['Closed Cases Rate'] = b['Opened Cases'] > 0
-        ? Number(((b['Closed Cases'] / b['Opened Cases']) * 100).toFixed(1))
-        : 0;
-    });
+      Object.values(out).forEach(b => {
+        b['Closed Cases Rate'] = b['Opened Cases'] > 0
+          ? Number(((b['Closed Cases'] / b['Opened Cases']) * 100).toFixed(1))
+          : 0;
+      });
+    }
+
+    // Actividad → SUM of "Answered Calls" per bucket (date comes pre-parsed from Source.Name)
+    if (dbActivity) {
+      dbActivity.forEach(a => {
+        const d = dayjs(a.dateMs);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        ensure(d.format(formatStr))['Incoming Calls'] += a.answeredCalls;
+      });
+    }
 
     return out;
-  }, [dbCases, hierarchy, startDate, endDate]);
+  }, [dbCases, dbActivity, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
