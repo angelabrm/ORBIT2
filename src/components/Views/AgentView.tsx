@@ -1562,6 +1562,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
+                          connectNulls={indicator === 'QA'}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
