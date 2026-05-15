@@ -44,6 +44,7 @@ interface RosterUser {
   rfc: string;
   compass?: string;
   callPicker?: string;
+  qa?: string;
   name: string;
   role: string;
   client: string;
@@ -113,6 +114,7 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
   const docCol        = col('Documento');
   const compassCol    = col('Compass');
   const callPickerCol = col('CallPicker');
+  const qaCol         = col('QA');
   const nombreCol     = col('Nombre');
   const nivelCol      = col('Nivel');
   const mesaCol       = col('MESA_');
@@ -125,13 +127,14 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
       const rfc = row[docCol]?.trim().toUpperCase();
       const compass    = compassCol    >= 0 ? (row[compassCol]?.trim()    || undefined) : undefined;
       const callPicker = callPickerCol >= 0 ? (row[callPickerCol]?.trim() || undefined) : undefined;
+      const qa         = qaCol         >= 0 ? (row[qaCol]?.trim()         || undefined) : undefined;
       const nombre = row[nombreCol]?.trim() || '';
       const nivel = row[nivelCol]?.trim() || '';
       const mesa = row[mesaCol]?.trim() || '';
       const clientVal = row[clientCol]?.trim() || '';
       const role = mapRole(nivel);
       if (!role || !rfc) return null;
-      return { rfc, compass, callPicker, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
+      return { rfc, compass, callPicker, qa, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
     })
     .filter(Boolean) as RosterUser[];
 
@@ -287,6 +290,69 @@ app.get('/api/incoming-calls', async (req, res) => {
   } catch (error: any) {
     console.error('[incoming-calls] error:', error?.message);
     res.status(500).json({ error: 'Failed to fetch activity', detail: error?.message });
+  }
+});
+
+// Parse "YYYY-MM-DD HH:MM:SS.mmm" → { dateStr, dateMs } or null.
+// First 10 chars are the calendar date; we keep that as a string to avoid
+// any TZ shift on the frontend (same approach as parseSourceName).
+function parseMarcaTemporal(s: string): { dateStr: string; dateMs: number } | null {
+  if (!s || typeof s !== 'string') return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const dateStr = `${m[1]}-${m[2]}-${m[3]}`;
+  return { dateStr, dateMs: Date.UTC(parseInt(m[1],10), parseInt(m[2],10) - 1, parseInt(m[3],10)) };
+}
+
+app.get('/api/qa', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+
+    const { user, startDate, endDate } = req.query as { user?: string; startDate?: string; endDate?: string };
+
+    const userList = (user || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    let rows: any[];
+    if (userList.length > 0) {
+      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
+      const r = await pool.query(
+        `SELECT "Agente", "Marca temporal" FROM "QA" WHERE "Agente" IN (${placeholders})`,
+        userList,
+      );
+      rows = r.rows;
+    } else {
+      const r = await pool.query('SELECT "Agente", "Marca temporal" FROM "QA"');
+      rows = r.rows;
+    }
+
+    const start = startDate ? Date.parse(startDate) : null;
+    const end   = endDate   ? Date.parse(endDate)   : null;
+
+    const out = rows
+      .map(r => {
+        const p = parseMarcaTemporal(r['Marca temporal']);
+        if (p === null) return null;
+        return {
+          agente: r['Agente'],
+          dateStr: p.dateStr,
+          dateMs: p.dateMs,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .filter(r => {
+        if (start !== null && r.dateMs < start - 86400000) return false;
+        if (end   !== null && r.dateMs > end   + 86400000) return false;
+        return true;
+      });
+
+    res.json(out);
+  } catch (error: any) {
+    console.error('[qa] error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch QA', detail: error?.message });
   }
 });
 

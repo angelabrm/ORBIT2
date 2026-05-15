@@ -48,6 +48,28 @@ export const fetchIncomingCalls = async (callPickers?: string[], startDate?: any
   }
 };
 
+export interface QARow {
+  agente: string;
+  dateStr: string;   // "YYYY-MM-DD" (TZ-safe bucketing key)
+  dateMs: number;    // UTC ms for legacy callers
+}
+
+export const fetchQA = async (agentes?: string[], startDate?: any, endDate?: any): Promise<QARow[]> => {
+  try {
+    const params = new URLSearchParams();
+    if (agentes && agentes.length > 0) params.append('user', agentes.join(','));
+    if (startDate) params.append('startDate', dayjs(startDate).toISOString());
+    if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
+
+    const response = await fetch(`/api/qa?${params.toString()}`);
+    if (!response.ok) throw new Error('Failed to fetch from API');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching QA:', error);
+    return [];
+  }
+};
+
 export const checkApiHealth = async () => {
   try {
     const response = await fetch('/api/health');

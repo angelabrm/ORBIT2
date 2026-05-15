@@ -20,7 +20,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
-import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow } from '../../services/apiService';
+import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
@@ -496,6 +496,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
   // Real Actividad rows from Neon, filtered to this user/team's CallPicker IDs
   const [dbActivity, setDbActivity] = React.useState<IncomingCallRow[] | null>(null);
+
+  // Real QA rows from Neon, filtered to this user/team's QA IDs
+  const [dbQA, setDbQA] = React.useState<QARow[] | null>(null);
   const [selectedDept, setSelectedDept] = React.useState<string>('All');
 
   // Team calculations for Management - moved up for dependency access
@@ -528,15 +531,21 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const loadDbData = async () => {
       if (!currentUser) return;
 
-      // Compass IDs join Abiertos.case_owner (cases). CallPicker IDs join Actividad.User (calls).
+      // Three independent joins on the Roster:
+      //  - Compass    → Abiertos."case_owner"   (Opened / Closed cases)
+      //  - CallPicker → Actividad."User"        (Incoming calls)
+      //  - QA         → QA."Agente"             (QA records)
       let compassIds: string[] = [];
       let callPickerIds: string[] = [];
+      let qaIds: string[] = [];
       if (currentUser.role === 'Agent') {
         if (currentUser.compass)    compassIds    = [currentUser.compass];
         if (currentUser.callPicker) callPickerIds = [currentUser.callPicker];
+        if (currentUser.qa)         qaIds         = [currentUser.qa];
       } else if (isManagement) {
         compassIds    = teamRfcs.map(rfc => users[rfc]?.compass   ).filter((c): c is string => !!c);
         callPickerIds = teamRfcs.map(rfc => users[rfc]?.callPicker).filter((c): c is string => !!c);
+        qaIds         = teamRfcs.map(rfc => users[rfc]?.qa        ).filter((c): c is string => !!c);
       }
 
       // Opened/Closed cases via Abiertos
@@ -553,6 +562,14 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         setDbActivity(activity);
       } else {
         setDbActivity(null);
+      }
+
+      // QA via QA table
+      if (qaIds.length > 0) {
+        const qa = await fetchQA(qaIds, startDate, endDate);
+        setDbQA(qa);
+      } else {
+        setDbQA(null);
       }
     };
     loadDbData();
@@ -673,7 +690,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA']),
     []
   );
 
@@ -685,6 +702,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       'Closed Cases': number;
       'Closed Cases Rate': number;
       'Incoming Calls': number;
+      'QA': number;
     };
     const out: Record<string, Bucket> = {};
     const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
@@ -693,7 +711,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const FMT = 'M/D/YYYY h:mm A';
 
     const ensure = (k: string): Bucket => {
-      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0 };
+      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0, 'QA': 0 };
       return out[k];
     };
 
@@ -729,8 +747,17 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
+    // QA → COUNT of records per bucket (per spec: simple count for now, formula TBD).
+    if (dbQA) {
+      dbQA.forEach(q => {
+        const d = dayjs(q.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        ensure(d.format(formatStr))['QA']++;
+      });
+    }
+
     return out;
-  }, [dbCases, dbActivity, hierarchy, startDate, endDate]);
+  }, [dbCases, dbActivity, dbQA, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
@@ -1109,7 +1136,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   };
 
   const indicatorOptions = [
-    { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
+    { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus', 'QA'] },
     { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
   ];
 
