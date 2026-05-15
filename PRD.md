@@ -193,7 +193,7 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 - Capa de datos mock Pepsico centralizada en `pepsicoMockData.ts` — seeded por RFC, garantiza consistencia entre PMView y PepsicoManagerView
 - Pestaña Financial del Executive con datos de Stellantis y Pepsico
 - Backend Express con endpoint de casos abiertos (Neon PostgreSQL)
-- **Migración progresiva mock → Neon (Fase 1, Stellantis):** los indicadores `Opened Cases`, `Closed Cases` y `Closed Cases Rate` en el line chart de `AgentView` ahora se calculan desde la tabla `Abiertos` agrupando por la jerarquía temporal seleccionada (día/semana/mes/año). El cruce se hace por `case_owner` ↔ `Compass` del Roster. El KPI individual de Opened Cases ya consumía BD; ahora la serie temporal también
+- **Migración progresiva mock → Neon (Stellantis):** seis indicadores del line chart de `AgentView` ya provienen de Neon — `Opened Cases`, `Closed Cases`, `Closed Cases Rate`, `Incoming Calls`, `QA`, `NSAT`. Ver §11 para fórmulas, joins y formato por indicador
 - Despliegue en Vercel con `api/index.ts` como serverless function en `orbit-2-weld.vercel.app`. `engines.node` pineado a `22.x`, `@neondatabase/serverless` eliminado del path de cold start, `pg` y `dayjs` cargados lazy desde dentro de los handlers
 - Rango de fechas default del dashboard: últimos 12 meses rolling (`dayjs().subtract(12, 'month').startOf('month')` → `dayjs()`), garantiza que los datos reales de BD entren en ventana al cargar
 - Aislamiento de sesión al cerrar
@@ -205,8 +205,8 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 | `ExecutiveView` activa | Conectar `ExecutiveView.tsx` al routing de `Dashboard.tsx` |
 | Fuente de datos campañas Pepsico | Reemplazar el mock de campañas con la fuente real (fases, tasks, fechas, estados) |
 | Control de acceso backend | Validación de rol/cliente en endpoints de la API |
-| Migración mock → Neon (Fase 2+) | Mover el resto de indicadores Stellantis del line chart (Performance, Productivity, Ranking, Bonus, NSAT Information, NSAT Claims, Incoming/Outgoing Calls, % FCR, Backlog Team) a tablas reales en Neon. Cada nuevo indicador se activa agregándolo al `Set DB_INDICATORS` en `AgentView.tsx` y extendiendo `dbTrendByBucket` con la agregación correspondiente. Misma técnica aplica para los KPIs cards superiores |
-| Compass mapping completo en Roster | 31 filas del Google Sheet aún tienen nombre real en la columna `Compass` en vez de `User X`. Esos usuarios no recibirán datos de Neon hasta que se les mapee al identificador correcto. Lista exacta documentada en el historial de commits |
+| Migración mock → Neon (siguientes indicadores) | Faltan por migrar al line chart: `Performance`, `Productivity`, `Ranking`, `Bonus`, `NSAT Information`, `NSAT Claims`, `Outgoing Calls`, `% First Contact Resolution`, `Backlog Team`. Misma técnica: agregar al `Set DB_INDICATORS` en `AgentView.tsx` + extender `dbTrendByBucket`. Los KPI cards superiores también siguen en mock |
+| Mapeo completo de joins en Roster | Sigue habiendo filas del Google Sheet con nombre real en `Compass` / `CallPicker` / `QA` en vez del identificador `User X`. Esos usuarios reciben 0 datos del indicador correspondiente hasta que se les complete el mapeo |
 | Bug `ProjectManagerView.tsx:93` | Filtra cases por `rfcs.includes(c.case_owner)` pero `case_owner` es Compass, no RFC. Mismo bug ya corregido en `AgentView.tsx` |
 | Day-inclusive margin en `/api/opened-cases` | El backend agrega ±1 día al filtro de fechas (línea `t < start - 86400000`). Si el usuario pone start=end=15-Abr-2026 devuelve casos del 14, 15 y 16. Útil como tolerancia de timezone pero impreciso |
 
@@ -354,3 +354,47 @@ Los datos de campañas (nombres, fechas, fases, tasks, estados) provienen de una
 |-----|---------|
 | PM | Ve únicamente sus propias campañas y métricas |
 | Manager | Ve rendimiento agregado del equipo; puede navegar a la vista individual de cualquier PM vía dropdown del Sidebar |
+
+---
+
+## 11. Migración mock → Neon: estado por indicador (Stellantis)
+
+El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (métricas agregadas calculadas a partir de varios indicadores) e **Indicators** (métricas que vienen directo de una tabla fuente). El extension point en código es el `Set DB_INDICATORS` en `AgentView.tsx`; agregar un indicador ahí y extender `dbTrendByBucket` lo "promueve" de mock a Neon.
+
+### Indicadores ya en Neon
+
+| Indicador | Tabla fuente | Join | Agregación por bucket | Display |
+|---|---|---|---|---|
+| `Opened Cases` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | COUNT de filas con `datetime_opened` en el bucket | entero |
+| `Closed Cases` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | COUNT de filas con `datetime_closed` en el bucket | entero |
+| `Closed Cases Rate` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | (Closed/Opened) × 100 por bucket | decimal |
+| `Incoming Calls` | `Actividad` | `User` ↔ `Roster.CallPicker` | SUM de `Answered Calls` (no count). Fecha viene de parsear `Source.Name` con formato `Actividad_YYYY_MM_DD.csv` | entero |
+| `QA` | `QA` + `QA_Premium` (merged) | `Agente` (QA) o `Agent` (QA_Premium) ↔ `Roster.QA` | AVG de score por fila. Score = suma ponderada de 10 criterios (5 × 16 pts soft skills + 5 × 4 pts process) con penalty all-or-nothing por `Error Crítico`/`Critical Error`. Premium tiene reglas levemente distintas: textos en inglés, "NA" cuenta como crédito completo en criterios. Filas sin evaluaciones → bucket ausente (gap en línea, conectado por `connectNulls`) | porcentaje `92.8%` |
+| `NSAT` | `NSAT` | `case_owner` ↔ `Roster.Compass` | NPS-style Index: por cada Q (Q1=`agent_satisfaction_score`, Q2=`effort_score`, Q3=`overall_satisfaction_score`), `((promotores − detractores) / total) × 100`. Promotores = 9–10, detractores = 1–6, pasivos = 7–8. Index = promedio de las 3 Qs. Buckets sin respuestas → gap conectado | entero `[-100, +100]` (sin `%`) |
+
+### Indicadores aún en mock (por migrar)
+
+`Performance`, `Productivity`, `Ranking`, `Bonus` (todos KPIs derivados — necesitan que los indicadores base estén en Neon primero), `NSAT Information`, `NSAT Claims`, `Outgoing Calls`, `% First Contact Resolution`, `Backlog Team`.
+
+### Patrones técnicos del backend
+
+| Helper | Uso |
+|---|---|
+| `parseSourceName` | Parsea `Actividad_YYYY_MM_DD.csv` → `{ dateStr, dateMs }` |
+| `parseMarcaTemporal` | Acepta `Date` (timestamp Postgres) o string ISO de QA |
+| `parseDateFlex` | Tolera Date, ISO, o `M/D/YYYY` (Abiertos varchar). Default para nuevas tablas |
+| `queryQaTable` | Wrappea SELECTs con try/catch para que una tabla faltante no tumbe el endpoint completo |
+| `isErrorCritico` | Compartido entre QA y QA_Premium: null/empty/`NA`/`N/A` → sin error |
+| `scoreQaRow` | Compartido entre las dos tablas QA, con `QaConfig` parametrizable (string de "thumbs up", regla NA) |
+
+### Patrones técnicos del frontend (`AgentView.tsx`)
+
+- `dbTrendByBucket` retorna `{ out, qaByBucket, nsatByBucket }`:
+  - `out` — buckets con valores tipo COUNT (0 es legítimo)
+  - `qaByBucket`, `nsatByBucket` — buckets con valores tipo AVG/INDEX (bucket ausente = sin datos → null en el chart)
+- En el render del `<Line>`: `connectNulls={indicator === 'QA' || indicator === 'NSAT'}` para que la línea atraviese los gaps
+- Tooltip y `LabelList` aplican formato por indicador: `% suffix` para QA, entero raw para NSAT, defaults para counts
+
+### Ventana temporal
+
+Default startDate = `dayjs().subtract(12, 'month').startOf('month')`. Captura el año más reciente de datos automáticamente; ajustable desde el Sidebar.

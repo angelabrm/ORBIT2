@@ -48,18 +48,23 @@ React 19 + Vite frontend, Express 4 backend. Two parallel server entry points sh
 | Endpoint | Purpose |
 |---|---|
 | `GET  /api/health` | DB connectivity check |
-| `GET  /api/roster` | All Roster users (5-min in-memory cache) |
-| `POST /api/login` | RFC lookup against Roster, returns user or 404 |
-| `GET  /api/opened-cases` | Neon PostgreSQL query, varchar date filtering done in JS |
+| `GET  /api/roster` | All Roster users from Google Sheets (5-min cache). Exposes `compass`, `callPicker`, `qa` join keys |
+| `POST /api/login` | RFC lookup against Roster |
+| `GET  /api/opened-cases` | Abiertos rows (filtered by `case_owner` ↔ `Roster.compass`) |
+| `GET  /api/incoming-calls` | Actividad rows aggregated by `User` ↔ `Roster.callPicker` |
+| `GET  /api/qa` | QA + QA_Premium merged, weighted per-row score (`Agente`/`Agent` ↔ `Roster.qa`) |
+| `GET  /api/nsat` | NSAT rows with Q1/Q2/Q3 scores (`case_owner` ↔ `Roster.compass`) |
 
 The Roster is fetched from Google Sheets via the public CSV export URL (`gviz/tq?tqx=out:csv`) — **no service account or credentials**. If that ever changes (sheet made private), `fetchRosterFromSheets()` lives in both `server.ts` and `api/index.ts` and must be updated in both.
+
+**Date columns from Neon**: emit `dateStr: "YYYY-MM-DD"` (string) from the backend, not just `dateMs`. Reading `dayjs(dateMs)` on the frontend shifts by the browser's TZ offset and slides every datapoint by a day for users west of UTC. The helpers `parseSourceName`, `parseMarcaTemporal`, and `parseDateFlex` all return both fields — frontend bucketing reads `dateStr`.
 
 ### Frontend layout
 
 ```
 src/
 ├── context/AuthContext.tsx   Global state: user, users (RFC→User map), selectedMember, managementTab, dateRange
-├── services/apiService.ts    fetchOpenedCases(), checkApiHealth()
+├── services/apiService.ts    fetchOpenedCases / fetchIncomingCalls / fetchQA / fetchNSAT
 ├── data/
 │   ├── mockData.ts           METRICS_DATA + getFilteredMetrics() + generateHistoricalData() (no user data)
 │   └── pepsicoMockData.ts    Shared Pepsico mock layer: generateCampaignsForPM, generatePMMetrics,
@@ -104,8 +109,16 @@ User data is **never** hardcoded. `MOCK_USERS` no longer exists. Components read
 
 ## Progressive migration: mock → Neon
 
-The Stellantis trend chart in `AgentView.tsx` is moving from synthetic `generateHistoricalData(rfc)` mock to real (anonymized) Neon data. The `DB_INDICATORS` Set inside the component is the extension point — indicators listed there are pulled from `dbTrendByBucket` (computed by bucketing the rows returned from `/api/opened-cases` into the chart's hierarchy keys); everything else stays on mock until its source table exists.
+The Stellantis trend chart in `AgentView.tsx` is moving from synthetic `generateHistoricalData(rfc)` mock to real (anonymized) Neon data. See PRD §11 for the per-indicator status, formulas, and join keys.
 
-Currently sourced from Neon: `Opened Cases`, `Closed Cases`, `Closed Cases Rate`. To add another (e.g. NSAT), include it in `DB_INDICATORS` and extend the per-bucket aggregation alongside the existing fields.
+The wiring inside the component:
 
-`case_owner` in `Abiertos` joins to `users[rfc].compass` — the `Compass` column in the Google Sheet must hold the same identifier used in the DB (e.g. `User 24`). Users without a matching `Compass` value will correctly show 0 cases.
+- `DB_INDICATORS` Set — indicator names that should pull from BD instead of mock. Add to this set to "promote" a new indicator.
+- `dbTrendByBucket` useMemo — returns `{ out, qaByBucket, nsatByBucket }`:
+  - `out` holds **count-style** values (Opened Cases, Closed Cases, Incoming Calls, …) where `0` is a legitimate datapoint.
+  - `qaByBucket` / `nsatByBucket` hold **average-style** values where empty buckets are *absent* from the map — the trendData consumer renders `null` for those, so Recharts shows a gap. Lines for these indicators set `connectNulls={true}` so the gap is bridged.
+- New BD-backed indicators with average semantics (NSAT-like) should follow the `xxxByBucket` pattern. Counts can stay in `out`.
+
+When adding a new indicator, also touch:
+- `indicatorOptions` dropdown (KPIs are aggregates of multiple indicators; Indicators come from a single source table).
+- Tooltip + LabelList formatters in the LineChart — add a `% suffix` / integer / no-suffix branch as needed (QA shows `92.8%`; NSAT shows `-33`; counts show raw integer).
