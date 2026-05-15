@@ -747,12 +747,22 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    // QA → COUNT of records per bucket (per spec: simple count for now, formula TBD).
+    // QA → AVERAGE of per-evaluation scores per bucket.
+    //   Per-evaluation score (0-100) is computed server-side from the 10
+    //   weighted criteria + the Error Crítico all-or-nothing penalty.
+    //   We accumulate sum + count here, then divide once at the end.
     if (dbQA) {
+      const qaAcc: Record<string, { sum: number; count: number }> = {};
       dbQA.forEach(q => {
         const d = dayjs(q.dateStr);
         if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
-        ensure(d.format(formatStr))['QA']++;
+        const k = d.format(formatStr);
+        if (!qaAcc[k]) qaAcc[k] = { sum: 0, count: 0 };
+        qaAcc[k].sum += q.score;
+        qaAcc[k].count++;
+      });
+      Object.entries(qaAcc).forEach(([k, { sum, count }]) => {
+        ensure(k)['QA'] = count > 0 ? Number((sum / count).toFixed(1)) : 0;
       });
     }
 

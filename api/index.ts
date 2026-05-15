@@ -315,6 +315,41 @@ function parseMarcaTemporal(v: any): { dateStr: string; dateMs: number } | null 
   };
 }
 
+// QA score per row:
+//   Soft skills (5 × 16 = 80 pts): Cultivar, Lenguaje y Tono, Empatía, Escucha
+//     Activa / Confirmación, Asegurar
+//   Process    (5 × 4  = 20 pts): Documentación, Tipificación de Casos,
+//     Verificación, Cumplimiento de Procesos, Toma de Decisiones
+//   Error Crítico: if set to anything other than NA / N/A / empty → score = 0
+//
+// Column names are matched by case-insensitive partial regex because the
+// real names include mojibake-encoded accents and one is truncated to 63
+// chars by Postgres ("Toma de Decisiones / Pensamiento Crítico (Incluidos
+// Recursos C").
+const QA_CRITERIA: { weight: number; pattern: RegExp }[] = [
+  { weight: 16, pattern: /cultivar/i },              // Cultivar la Reputación...
+  { weight: 16, pattern: /lenguaje/i },              // Lenguaje y Tono
+  { weight: 16, pattern: /empat/i },                 // Empatía
+  { weight: 16, pattern: /escucha/i },               // Escucha Activa / Confirmación
+  { weight: 16, pattern: /^asegurar/i },             // Asegurar
+  { weight: 4,  pattern: /documentaci/i },           // Documentación
+  { weight: 4,  pattern: /tipificaci/i },            // Tipificación de Casos
+  { weight: 4,  pattern: /verificaci/i },            // Verificación
+  { weight: 4,  pattern: /cumplimiento/i },          // Cumplimiento de Procesos
+  { weight: 4,  pattern: /toma de decisiones/i },    // Toma de Decisiones / Pensamiento Crítico
+];
+const QA_ERROR_PATTERN = /error.*cr/i;               // Error Crítico (matches even truncated)
+
+// "Sin error" = null / empty / NA / N/A (case-insensitive trim).
+function isErrorCritico(v: unknown): boolean {
+  if (v == null) return false;
+  const s = String(v).trim();
+  if (s === '') return false;
+  const upper = s.toUpperCase();
+  if (upper === 'NA' || upper === 'N/A') return false;
+  return true;
+}
+
 app.get('/api/qa', async (req, res) => {
   try {
     const pool = await getPool();
@@ -327,34 +362,56 @@ app.get('/api/qa', async (req, res) => {
       .map(s => s.trim())
       .filter(Boolean);
 
-    let rows: any[];
+    let result;
     if (userList.length > 0) {
       const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
-      const r = await pool.query(
-        `SELECT "Agente", "Marca temporal" FROM "QA" WHERE "Agente" IN (${placeholders})`,
+      result = await pool.query(
+        `SELECT * FROM "QA" WHERE "Agente" IN (${placeholders})`,
         userList,
       );
-      rows = r.rows;
     } else {
-      const r = await pool.query('SELECT "Agente", "Marca temporal" FROM "QA"');
-      rows = r.rows;
+      result = await pool.query('SELECT * FROM "QA"');
     }
+
+    // Resolve the actual column name for each criterion + the error column.
+    const allCols: string[] = (result.fields || []).map((f: any) => f.name);
+    const criterionCols = QA_CRITERIA.map(c => ({
+      weight: c.weight,
+      col: allCols.find(name => c.pattern.test(name)),
+    }));
+    const errorCol = allCols.find(name => QA_ERROR_PATTERN.test(name));
 
     const start = startDate ? Date.parse(startDate) : null;
     const end   = endDate   ? Date.parse(endDate)   : null;
 
-    const out = rows
-      .map(r => {
-        const p = parseMarcaTemporal(r['Marca temporal']);
+    const out = result.rows
+      .map((row: any) => {
+        const p = parseMarcaTemporal(row['Marca temporal']);
         if (p === null) return null;
+
+        // Compute the score
+        let score = 0;
+        if (errorCol && isErrorCritico(row[errorCol])) {
+          score = 0; // all-or-nothing penalty
+        } else {
+          for (const { weight, col } of criterionCols) {
+            if (!col) continue;
+            const v = row[col];
+            if (v != null && String(v).trim() === 'Pulgar Arriba') {
+              score += weight;
+            }
+          }
+        }
+
         return {
-          agente: r['Agente'],
+          agente: row['Agente'],
           dateStr: p.dateStr,
           dateMs: p.dateMs,
+          score,
         };
       })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-      .filter(r => {
+      .filter((r: any): r is NonNullable<typeof r> => r !== null)
+      .filter((r: any) => {
         if (start !== null && r.dateMs < start - 86400000) return false;
         if (end   !== null && r.dateMs > end   + 86400000) return false;
         return true;

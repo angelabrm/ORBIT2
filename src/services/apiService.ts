@@ -52,6 +52,7 @@ export interface QARow {
   agente: string;
   dateStr: string;   // "YYYY-MM-DD" (TZ-safe bucketing key)
   dateMs: number;    // UTC ms for legacy callers
+  score: number;     // 0-100 per-evaluation score (see QA scoring spec in api/index.ts)
 }
 
 export const fetchQA = async (agentes?: string[], startDate?: any, endDate?: any): Promise<QARow[]> => {
