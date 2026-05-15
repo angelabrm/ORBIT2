@@ -315,30 +315,26 @@ function parseMarcaTemporal(v: any): { dateStr: string; dateMs: number } | null 
   };
 }
 
-// QA score per row:
-//   Soft skills (5 × 16 = 80 pts): Cultivar, Lenguaje y Tono, Empatía, Escucha
-//     Activa / Confirmación, Asegurar
-//   Process    (5 × 4  = 20 pts): Documentación, Tipificación de Casos,
-//     Verificación, Cumplimiento de Procesos, Toma de Decisiones
-//   Error Crítico: if set to anything other than NA / N/A / empty → score = 0
-//
-// Column names are matched by case-insensitive partial regex because the
-// real names include mojibake-encoded accents and one is truncated to 63
-// chars by Postgres ("Toma de Decisiones / Pensamiento Crítico (Incluidos
-// Recursos C").
+// QA scoring (shared between QA and QA_Premium tables):
+//   Soft skills (5 × 16 = 80 pts) and Process (5 × 4 = 20 pts) — 100 max.
+//   Each criterion column gets matched by case-insensitive partial regex
+//   so we handle both Spanish (QA table) and English (QA_Premium) names,
+//   plus Postgres' 63-byte identifier truncation and mojibake-encoded accents.
 const QA_CRITERIA: { weight: number; pattern: RegExp }[] = [
-  { weight: 16, pattern: /cultivar/i },              // Cultivar la Reputación...
-  { weight: 16, pattern: /lenguaje/i },              // Lenguaje y Tono
-  { weight: 16, pattern: /empat/i },                 // Empatía
-  { weight: 16, pattern: /escucha/i },               // Escucha Activa / Confirmación
-  { weight: 16, pattern: /^asegurar/i },             // Asegurar
-  { weight: 4,  pattern: /documentaci/i },           // Documentación
-  { weight: 4,  pattern: /tipificaci/i },            // Tipificación de Casos
-  { weight: 4,  pattern: /verificaci/i },            // Verificación
-  { weight: 4,  pattern: /cumplimiento/i },          // Cumplimiento de Procesos
-  { weight: 4,  pattern: /toma de decisiones/i },    // Toma de Decisiones / Pensamiento Crítico
+  // Soft skills — 16 pts each
+  { weight: 16, pattern: /cultivar|cultivate/i },                   // Cultivar… / Cultivate Stellantis…
+  { weight: 16, pattern: /lenguaje|language/i },                    // Lenguaje y Tono / Language and Tone
+  { weight: 16, pattern: /empat/i },                                // Empatía / Empathy
+  { weight: 16, pattern: /escucha|listening/i },                    // Escucha Activa… / Active Listening…
+  { weight: 16, pattern: /^asegurar|reassurance/i },                // Asegurar / Reassurance
+  // Process — 4 pts each
+  { weight: 4,  pattern: /documentaci|documentation/i },            // Documentación / Documentation
+  { weight: 4,  pattern: /tipificaci|case coding/i },               // Tipificación / Case Coding
+  { weight: 4,  pattern: /verificaci|verification/i },              // Verificación / Verification
+  { weight: 4,  pattern: /cumplimiento|process adherence/i },       // Cumplimiento / Process Adherence
+  { weight: 4,  pattern: /toma de decisiones|decision making/i },   // Toma de Decisiones / Decision Making
 ];
-const QA_ERROR_PATTERN = /error.*cr/i;               // Error Crítico (matches even truncated)
+const QA_ERROR_PATTERN = /(error.*cr|critical.*error)/i;            // Error Crítico / Critical Error
 
 // "Sin error" = null / empty / NA / N/A (case-insensitive trim).
 function isErrorCritico(v: unknown): boolean {
@@ -348,6 +344,62 @@ function isErrorCritico(v: unknown): boolean {
   const upper = s.toUpperCase();
   if (upper === 'NA' || upper === 'N/A') return false;
   return true;
+}
+
+// Per-table scoring config.
+type QaConfig = {
+  thumbsUp: string;        // exact (case-insensitive) value granting full credit
+  naCountsAsFull: boolean; // whether "NA" / "N/A" in a criterion column also grants full credit
+};
+
+function scoreQaRow(row: any, cols: string[], config: QaConfig): number {
+  const errorCol = cols.find(c => QA_ERROR_PATTERN.test(c));
+  if (errorCol && isErrorCritico(row[errorCol])) return 0;
+
+  let score = 0;
+  for (const { weight, pattern } of QA_CRITERIA) {
+    const col = cols.find(c => pattern.test(c));
+    if (!col) continue;
+    const raw = row[col];
+    if (raw == null) continue;
+    const v = String(raw).trim();
+    const vu = v.toUpperCase();
+    if (v.toLowerCase() === config.thumbsUp.toLowerCase()) {
+      score += weight;
+    } else if (config.naCountsAsFull && (vu === 'NA' || vu === 'N/A')) {
+      score += weight;
+    }
+  }
+  return score;
+}
+
+// Run a SELECT against either QA table. Returns [] if the table doesn't
+// exist (so a missing QA_Premium table doesn't kill the whole endpoint).
+async function queryQaTable(
+  pool: any,
+  tableName: string,
+  agentCol: string,
+  userList: string[],
+): Promise<{ rows: any[]; cols: string[] }> {
+  try {
+    let r;
+    if (userList.length > 0) {
+      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
+      r = await pool.query(
+        `SELECT * FROM "${tableName}" WHERE "${agentCol}" IN (${placeholders})`,
+        userList,
+      );
+    } else {
+      r = await pool.query(`SELECT * FROM "${tableName}"`);
+    }
+    return {
+      rows: r.rows,
+      cols: (r.fields || []).map((f: any) => f.name),
+    };
+  } catch (err: any) {
+    console.warn(`[qa] table "${tableName}" unavailable: ${err?.message}`);
+    return { rows: [], cols: [] };
+  }
 }
 
 app.get('/api/qa', async (req, res) => {
@@ -362,54 +414,33 @@ app.get('/api/qa', async (req, res) => {
       .map(s => s.trim())
       .filter(Boolean);
 
-    let result;
-    if (userList.length > 0) {
-      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
-      result = await pool.query(
-        `SELECT * FROM "QA" WHERE "Agente" IN (${placeholders})`,
-        userList,
-      );
-    } else {
-      result = await pool.query('SELECT * FROM "QA"');
-    }
+    // Query both tables in parallel.
+    const [qa, premium] = await Promise.all([
+      queryQaTable(pool, 'QA',         'Agente', userList),
+      queryQaTable(pool, 'QA_Premium', 'Agent',  userList),
+    ]);
 
-    // Resolve the actual column name for each criterion + the error column.
-    const allCols: string[] = (result.fields || []).map((f: any) => f.name);
-    const criterionCols = QA_CRITERIA.map(c => ({
-      weight: c.weight,
-      col: allCols.find(name => c.pattern.test(name)),
-    }));
-    const errorCol = allCols.find(name => QA_ERROR_PATTERN.test(name));
+    const qaConfig:      QaConfig = { thumbsUp: 'Pulgar Arriba', naCountsAsFull: false };
+    const premiumConfig: QaConfig = { thumbsUp: 'Thumbs up',     naCountsAsFull: true  };
+
+    const buildRow = (row: any, agentColName: string, cols: string[], config: QaConfig) => {
+      const p = parseMarcaTemporal(row['Marca temporal'] ?? row['Marca Temporal']);
+      if (p === null) return null;
+      return {
+        agente: row[agentColName],
+        dateStr: p.dateStr,
+        dateMs: p.dateMs,
+        score: scoreQaRow(row, cols, config),
+      };
+    };
 
     const start = startDate ? Date.parse(startDate) : null;
     const end   = endDate   ? Date.parse(endDate)   : null;
 
-    const out = result.rows
-      .map((row: any) => {
-        const p = parseMarcaTemporal(row['Marca temporal']);
-        if (p === null) return null;
-
-        // Compute the score
-        let score = 0;
-        if (errorCol && isErrorCritico(row[errorCol])) {
-          score = 0; // all-or-nothing penalty
-        } else {
-          for (const { weight, col } of criterionCols) {
-            if (!col) continue;
-            const v = row[col];
-            if (v != null && String(v).trim() === 'Pulgar Arriba') {
-              score += weight;
-            }
-          }
-        }
-
-        return {
-          agente: row['Agente'],
-          dateStr: p.dateStr,
-          dateMs: p.dateMs,
-          score,
-        };
-      })
+    const out = [
+      ...qa.rows.map(r => buildRow(r, 'Agente', qa.cols, qaConfig)),
+      ...premium.rows.map(r => buildRow(r, 'Agent', premium.cols, premiumConfig)),
+    ]
       .filter((r: any): r is NonNullable<typeof r> => r !== null)
       .filter((r: any) => {
         if (start !== null && r.dateMs < start - 86400000) return false;
