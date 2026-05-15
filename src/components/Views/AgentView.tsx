@@ -20,7 +20,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
-import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow } from '../../services/apiService';
+import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow, fetchNSAT, NSATRow } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
@@ -499,6 +499,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
   // Real QA rows from Neon, filtered to this user/team's QA IDs
   const [dbQA, setDbQA] = React.useState<QARow[] | null>(null);
+
+  // Real NSAT rows from Neon, joined on this user/team's Compass IDs
+  const [dbNSAT, setDbNSAT] = React.useState<NSATRow[] | null>(null);
   const [selectedDept, setSelectedDept] = React.useState<string>('All');
 
   // Team calculations for Management - moved up for dependency access
@@ -554,6 +557,14 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         setDbCases(cases.filter(c => compassIds.includes(c.case_owner)));
       } else {
         setDbCases(null);
+      }
+
+      // NSAT survey rows via NSAT table (same Compass join as Abiertos)
+      if (compassIds.length > 0) {
+        const nsat = await fetchNSAT(compassIds, startDate, endDate);
+        setDbNSAT(nsat);
+      } else {
+        setDbNSAT(null);
       }
 
       // Incoming calls via Actividad
@@ -690,7 +701,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT']),
     []
   );
 
@@ -703,6 +714,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       'Closed Cases Rate': number;
       'Incoming Calls': number;
       'QA': number;
+      'NSAT': number;
     };
     const out: Record<string, Bucket> = {};
     const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
@@ -711,7 +723,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const FMT = 'M/D/YYYY h:mm A';
 
     const ensure = (k: string): Bucket => {
-      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0, 'QA': 0 };
+      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0, 'QA': 0, 'NSAT': 0 };
       return out[k];
     };
 
@@ -768,8 +780,18 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
+    // NSAT → COUNT of records per bucket (per spec: simple count for now,
+    // formula TBD).
+    if (dbNSAT) {
+      dbNSAT.forEach(n => {
+        const d = dayjs(n.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        ensure(d.format(formatStr))['NSAT']++;
+      });
+    }
+
     return { out, qaByBucket };
-  }, [dbCases, dbActivity, dbQA, hierarchy, startDate, endDate]);
+  }, [dbCases, dbActivity, dbQA, dbNSAT, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
@@ -1160,7 +1182,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // KPIs are aggregate scores computed from several indicators.
     { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
     // Indicators are values that come directly from a single source table.
-    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'QA', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
+    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
   ];
 
   const getKpiColor = (val: number) => {

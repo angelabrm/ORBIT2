@@ -455,6 +455,96 @@ app.get('/api/qa', async (req, res) => {
   }
 });
 
+// Tolerant date parser: accepts Date objects (Postgres timestamps), ISO-prefixed
+// strings ("YYYY-MM-DD…"), and the M/D/YYYY varchar style used by Abiertos.
+// Returns { dateStr, dateMs } or null.
+function parseDateFlex(v: any): { dateStr: string; dateMs: number } | null {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    const iso = v.toISOString();
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    return {
+      dateStr: `${m[1]}-${m[2]}-${m[3]}`,
+      dateMs: Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)),
+    };
+  }
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  // ISO prefix
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return {
+    dateStr: `${m[1]}-${m[2]}-${m[3]}`,
+    dateMs: Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)),
+  };
+  // M/D/YYYY (Abiertos style)
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) {
+    const y = parseInt(m[3], 10);
+    const mo = parseInt(m[1], 10);
+    const d = parseInt(m[2], 10);
+    return {
+      dateStr: `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+      dateMs: Date.UTC(y, mo - 1, d),
+    };
+  }
+  return null;
+}
+
+app.get('/api/nsat', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+
+    const { user, startDate, endDate } = req.query as { user?: string; startDate?: string; endDate?: string };
+
+    // `user` here is a CSV of Compass values (same key used by /api/opened-cases).
+    const userList = (user || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    let rows: any[];
+    if (userList.length > 0) {
+      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
+      const r = await pool.query(
+        `SELECT "case_owner", "datetime_closed" FROM "NSAT" WHERE "case_owner" IN (${placeholders})`,
+        userList,
+      );
+      rows = r.rows;
+    } else {
+      const r = await pool.query('SELECT "case_owner", "datetime_closed" FROM "NSAT"');
+      rows = r.rows;
+    }
+
+    const start = startDate ? Date.parse(startDate) : null;
+    const end   = endDate   ? Date.parse(endDate)   : null;
+
+    const out = rows
+      .map(r => {
+        const p = parseDateFlex(r['datetime_closed']);
+        if (p === null) return null;
+        return {
+          caseOwner: r['case_owner'],
+          dateStr: p.dateStr,
+          dateMs: p.dateMs,
+        };
+      })
+      .filter((r: any): r is NonNullable<typeof r> => r !== null)
+      .filter((r: any) => {
+        if (start !== null && r.dateMs < start - 86400000) return false;
+        if (end   !== null && r.dateMs > end   + 86400000) return false;
+        return true;
+      });
+
+    res.json(out);
+  } catch (error: any) {
+    console.error('[nsat] error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch NSAT', detail: error?.message });
+  }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
