@@ -750,7 +750,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // QA → AVERAGE of per-evaluation scores per bucket.
     //   Per-evaluation score (0-100) is computed server-side from the 10
     //   weighted criteria + the Error Crítico all-or-nothing penalty.
-    //   We accumulate sum + count here, then divide once at the end.
+    //   Only buckets with at least one record get a QA value; the rest stay
+    //   undefined so the line chart skips them (no spurious 0 points).
+    const qaByBucket: Record<string, number> = {};
     if (dbQA) {
       const qaAcc: Record<string, { sum: number; count: number }> = {};
       dbQA.forEach(q => {
@@ -762,11 +764,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         qaAcc[k].count++;
       });
       Object.entries(qaAcc).forEach(([k, { sum, count }]) => {
-        ensure(k)['QA'] = count > 0 ? Number((sum / count).toFixed(1)) : 0;
+        qaByBucket[k] = Number((sum / count).toFixed(1));
       });
     }
 
-    return out;
+    return { out, qaByBucket };
   }, [dbCases, dbActivity, dbQA, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
@@ -791,7 +793,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     });
 
     // Merge in any DB buckets that don't have a corresponding mock bucket
-    Object.keys(dbTrendByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.out).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.qaByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
       const entry: any = {
@@ -801,9 +804,17 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       };
 
       selectedIndicators.forEach(indicator => {
-        // DB-backed indicator: pull straight from the bucketed real data
+        // QA is rendered only on days/weeks/months that have at least one
+        // evaluation. Missing buckets stay `null` so Recharts breaks the
+        // line at that point instead of dropping to 0.
+        if (indicator === 'QA') {
+          const v = dbTrendByBucket.qaByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        // Other DB-backed indicators: 0 is a legitimate count
         if (DB_INDICATORS.has(indicator)) {
-          entry[indicator] = dbTrendByBucket[key]?.[indicator as keyof typeof dbTrendByBucket[string]] ?? 0;
+          entry[indicator] = dbTrendByBucket.out[key]?.[indicator as keyof typeof dbTrendByBucket.out[string]] ?? 0;
           return;
         }
         // Mock-backed indicator: same averaging as before
@@ -1146,8 +1157,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   };
 
   const indicatorOptions = [
-    { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus', 'QA'] },
-    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
+    // KPIs are aggregate scores computed from several indicators.
+    { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
+    // Indicators are values that come directly from a single source table.
+    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'QA', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
   ];
 
   const getKpiColor = (val: number) => {
@@ -1520,7 +1533,13 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       }}
                       itemStyle={{ fontSize: 18, padding: '4px 0' }}
                       labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
-                      formatter={(val: any, name: string) => [formatValue(val, ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name) || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si))), name]}
+                      formatter={(val: any, name: string) => {
+                        if (val == null) return ['—', name];
+                        if (name === 'QA') return [`${formatValue(val)}%`, name];
+                        const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name)
+                          || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si));
+                        return [formatValue(val, isInt), name];
+                      }}
                       labelFormatter={(label, payload) => {
                         if (payload && payload[0]) {
                           const date = payload[0].payload.fullDate;
@@ -1545,17 +1564,21 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           animationDuration={1500}
                         >
                           {trendData.length <= 25 && (
-                            <LabelList 
-                              dataKey={indicator} 
-                              position={index === 0 ? "top" : "bottom"} 
-                              offset={15} 
-                              style={{ 
-                                fontSize: 13, 
-                                fontWeight: 800, 
-                                fill: index === 0 ? theme.palette.primary.main : "#B018D9", 
-                                opacity: 1 
-                              }} 
-                              formatter={formatValue}
+                            <LabelList
+                              dataKey={indicator}
+                              position={index === 0 ? "top" : "bottom"}
+                              offset={15}
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 800,
+                                fill: index === 0 ? theme.palette.primary.main : "#B018D9",
+                                opacity: 1
+                              }}
+                              formatter={(val: any) => {
+                                if (val == null) return '';
+                                if (indicator === 'QA') return `${formatValue(val)}%`;
+                                return formatValue(val);
+                              }}
                             />
                           )}
                         </Line>
