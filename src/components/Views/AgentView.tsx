@@ -717,10 +717,13 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    // Actividad → SUM of "Answered Calls" per bucket (date comes pre-parsed from Source.Name)
+    // Actividad → SUM of "Answered Calls" per bucket.
+    // Use the pre-parsed dateStr ("YYYY-MM-DD") to bucket — parsing dateMs through
+    // dayjs would shift by the browser's TZ offset and put e.g. 2026-03-15 into
+    // the 2026-03-14 bucket for users west of UTC.
     if (dbActivity) {
       dbActivity.forEach(a => {
-        const d = dayjs(a.dateMs);
+        const d = dayjs(a.dateStr); // parses as local-midnight of that calendar day
         if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
         ensure(d.format(formatStr))['Incoming Calls'] += a.answeredCalls;
       });

@@ -26,8 +26,9 @@ export const fetchOpenedCases = async (caseOwner?: string, startDate?: any, endD
 
 export interface IncomingCallRow {
   user: string;
-  date: string;       // e.g. "Actividad_2026_03_15.csv"
-  dateMs: number;     // parsed to UTC ms
+  source: string;        // original "Actividad_2026_03_15.csv"
+  dateStr: string;       // parsed "YYYY-MM-DD" — use this for bucketing (TZ-safe)
+  dateMs: number;        // UTC ms — kept for legacy callers, but `dayjs(dateMs)` will shift by TZ
   answeredCalls: number;
 }
 

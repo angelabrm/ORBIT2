@@ -220,15 +220,18 @@ app.get('/api/opened-cases', async (req, res) => {
   }
 });
 
-// Parse "Actividad_YYYY_MM_DD.csv" → ms-since-epoch UTC, or null if format unknown.
-function parseSourceName(s: string): number | null {
+// Parse "Actividad_YYYY_MM_DD.csv" → { dateStr: "YYYY-MM-DD", dateMs: UTC ms } or null.
+// dateStr is the timezone-agnostic value the frontend should use for bucketing
+// (avoids the local-timezone shift you get when dayjs(ms) is formatted).
+function parseSourceName(s: string): { dateStr: string; dateMs: number } | null {
   if (!s) return null;
   const m = s.match(/Actividad_(\d{4})_(\d{2})_(\d{2})\.csv$/i);
   if (!m) return null;
-  const year = parseInt(m[1], 10);
-  const month = parseInt(m[2], 10) - 1;
-  const day = parseInt(m[3], 10);
-  return Date.UTC(year, month, day);
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+  const dateStr = `${m[1]}-${m[2]}-${m[3]}`;
+  return { dateStr, dateMs: Date.UTC(y, mo - 1, d) };
 }
 
 app.get('/api/incoming-calls', async (req, res) => {
@@ -263,12 +266,13 @@ app.get('/api/incoming-calls', async (req, res) => {
 
     const out = rows
       .map(r => {
-        const t = parseSourceName(r['Source.Name']);
-        if (t === null) return null;
+        const p = parseSourceName(r['Source.Name']);
+        if (p === null) return null;
         return {
           user: r['User'],
-          date: r['Source.Name'],
-          dateMs: t,
+          source: r['Source.Name'],
+          dateStr: p.dateStr,                          // "YYYY-MM-DD" — use this for bucketing
+          dateMs: p.dateMs,                            // UTC ms — for legacy callers
           answeredCalls: Number(r['Answered Calls']) || 0,
         };
       })
