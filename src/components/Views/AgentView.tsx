@@ -814,7 +814,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         // Drop the bucket entirely if no question had a response (chart shows gap).
         if (qs.every(q => q.t === 0)) return;
         const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
-        nsatByBucket[k] = Number(((perQ[0] + perQ[1] + perQ[2]) / 3).toFixed(1));
+        // NSAT is a -100…+100 integer score, not a percentage. Round, don't decimal.
+        nsatByBucket[k] = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
       });
     }
 
@@ -1591,7 +1592,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
                       formatter={(val: any, name: string) => {
                         if (val == null) return ['—', name];
-                        if (name === 'QA' || name === 'NSAT') return [`${formatValue(val)}%`, name];
+                        if (name === 'QA')   return [`${formatValue(val)}%`, name];
+                        if (name === 'NSAT') return [String(formatValue(val, true)), name]; // -100…+100 integer, no %
                         const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name)
                           || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si));
                         return [formatValue(val, isInt), name];
@@ -1633,7 +1635,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                               }}
                               formatter={(val: any) => {
                                 if (val == null) return '';
-                                if (indicator === 'QA' || indicator === 'NSAT') return `${formatValue(val)}%`;
+                                if (indicator === 'QA')   return `${formatValue(val)}%`;
+                                if (indicator === 'NSAT') return String(formatValue(val, true));
                                 return formatValue(val);
                               }}
                             />
