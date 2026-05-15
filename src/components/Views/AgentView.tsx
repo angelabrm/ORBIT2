@@ -713,8 +713,6 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       'Closed Cases': number;
       'Closed Cases Rate': number;
       'Incoming Calls': number;
-      'QA': number;
-      'NSAT': number;
     };
     const out: Record<string, Bucket> = {};
     const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
@@ -723,7 +721,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const FMT = 'M/D/YYYY h:mm A';
 
     const ensure = (k: string): Bucket => {
-      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0, 'QA': 0, 'NSAT': 0 };
+      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0 };
       return out[k];
     };
 
@@ -780,17 +778,47 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    // NSAT → COUNT of records per bucket (per spec: simple count for now,
-    // formula TBD).
-    if (dbNSAT) {
+    // NSAT Index per bucket. NPS-style: per question Q, score = % promoters
+    // (responses 9 or 10) minus % detractors (1-6), with 7/8 passive. Then
+    // average across the three questions.
+    //   - Each question's denominator counts only rows where THAT question
+    //     has a numeric answer (null/missing values are skipped).
+    //   - If all three questions have zero responses in a bucket, the bucket
+    //     stays out of nsatByBucket → line chart shows a gap (same as QA).
+    const nsatByBucket: Record<string, number> = {};
+    if (dbNSAT && dbNSAT.length > 0) {
+      type Q = { p: number; d: number; t: number };
+      const acc: Record<string, [Q, Q, Q]> = {};
+      const ensureAcc = (k: string) => {
+        if (!acc[k]) acc[k] = [
+          { p: 0, d: 0, t: 0 },
+          { p: 0, d: 0, t: 0 },
+          { p: 0, d: 0, t: 0 },
+        ];
+        return acc[k];
+      };
       dbNSAT.forEach(n => {
         const d = dayjs(n.dateStr);
         if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
-        ensure(d.format(formatStr))['NSAT']++;
+        const k = d.format(formatStr);
+        const bucket = ensureAcc(k);
+        [n.q1, n.q2, n.q3].forEach((v, i) => {
+          if (v == null || !Number.isFinite(v)) return;
+          bucket[i].t++;
+          if (v >= 9) bucket[i].p++;
+          else if (v <= 6) bucket[i].d++;
+        });
+      });
+
+      Object.entries(acc).forEach(([k, qs]) => {
+        // Drop the bucket entirely if no question had a response (chart shows gap).
+        if (qs.every(q => q.t === 0)) return;
+        const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
+        nsatByBucket[k] = Number(((perQ[0] + perQ[1] + perQ[2]) / 3).toFixed(1));
       });
     }
 
-    return { out, qaByBucket };
+    return { out, qaByBucket, nsatByBucket };
   }, [dbCases, dbActivity, dbQA, dbNSAT, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
@@ -817,6 +845,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // Merge in any DB buckets that don't have a corresponding mock bucket
     Object.keys(dbTrendByBucket.out).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.qaByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.nsatByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
       const entry: any = {
@@ -826,11 +855,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       };
 
       selectedIndicators.forEach(indicator => {
-        // QA is rendered only on days/weeks/months that have at least one
-        // evaluation. Missing buckets stay `null` so Recharts breaks the
-        // line at that point instead of dropping to 0.
+        // QA and NSAT are computed indicators that should leave a gap when
+        // there's no source data in the bucket — null lets Recharts skip
+        // the point. (We also opt these two into connectNulls below.)
         if (indicator === 'QA') {
           const v = dbTrendByBucket.qaByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        if (indicator === 'NSAT') {
+          const v = dbTrendByBucket.nsatByBucket[key];
           entry[indicator] = v !== undefined ? v : null;
           return;
         }
@@ -1557,7 +1591,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
                       formatter={(val: any, name: string) => {
                         if (val == null) return ['—', name];
-                        if (name === 'QA') return [`${formatValue(val)}%`, name];
+                        if (name === 'QA' || name === 'NSAT') return [`${formatValue(val)}%`, name];
                         const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name)
                           || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si));
                         return [formatValue(val, isInt), name];
@@ -1584,7 +1618,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
-                          connectNulls={indicator === 'QA'}
+                          connectNulls={indicator === 'QA' || indicator === 'NSAT'}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
@@ -1599,7 +1633,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                               }}
                               formatter={(val: any) => {
                                 if (val == null) return '';
-                                if (indicator === 'QA') return `${formatValue(val)}%`;
+                                if (indicator === 'QA' || indicator === 'NSAT') return `${formatValue(val)}%`;
                                 return formatValue(val);
                               }}
                             />

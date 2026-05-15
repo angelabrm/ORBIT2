@@ -505,18 +505,29 @@ app.get('/api/nsat', async (req, res) => {
       .map(s => s.trim())
       .filter(Boolean);
 
+    // The three survey scores that drive the NSAT Index:
+    //   Q1 = agent_satisfaction_score
+    //   Q2 = effort_score
+    //   Q3 = overall_satisfaction_score
+    const cols = '"case_owner", "datetime_closed", "agent_satisfaction_score", "effort_score", "overall_satisfaction_score"';
     let rows: any[];
     if (userList.length > 0) {
       const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
       const r = await pool.query(
-        `SELECT "case_owner", "datetime_closed" FROM "NSAT" WHERE "case_owner" IN (${placeholders})`,
+        `SELECT ${cols} FROM "NSAT" WHERE "case_owner" IN (${placeholders})`,
         userList,
       );
       rows = r.rows;
     } else {
-      const r = await pool.query('SELECT "case_owner", "datetime_closed" FROM "NSAT"');
+      const r = await pool.query(`SELECT ${cols} FROM "NSAT"`);
       rows = r.rows;
     }
+
+    const toScore = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
 
     const start = startDate ? Date.parse(startDate) : null;
     const end   = endDate   ? Date.parse(endDate)   : null;
@@ -529,6 +540,9 @@ app.get('/api/nsat', async (req, res) => {
           caseOwner: r['case_owner'],
           dateStr: p.dateStr,
           dateMs: p.dateMs,
+          q1: toScore(r['agent_satisfaction_score']),
+          q2: toScore(r['effort_score']),
+          q3: toScore(r['overall_satisfaction_score']),
         };
       })
       .filter((r: any): r is NonNullable<typeof r> => r !== null)
