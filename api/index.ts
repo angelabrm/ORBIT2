@@ -356,6 +356,27 @@ app.get('/api/qa', async (req, res) => {
   }
 });
 
+// Temporary diagnostic: dumps raw column names and first row of a Neon table.
+// Used to debug column-name / data-format mismatches. Remove once QA is verified.
+app.get('/api/_debug/table', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const name = String(req.query.name || '');
+    if (!/^[A-Za-z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Bad table name' });
+    const r = await pool.query(`SELECT * FROM "${name}" LIMIT 3`);
+    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM "${name}"`);
+    res.json({
+      table: name,
+      totalRows: total.rows[0]?.n ?? null,
+      columns: r.fields?.map((f: any) => f.name) ?? [],
+      sample: r.rows,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message });
+  }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
