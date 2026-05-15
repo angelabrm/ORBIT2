@@ -293,15 +293,26 @@ app.get('/api/incoming-calls', async (req, res) => {
   }
 });
 
-// Parse "YYYY-MM-DD HH:MM:SS.mmm" → { dateStr, dateMs } or null.
-// First 10 chars are the calendar date; we keep that as a string to avoid
-// any TZ shift on the frontend (same approach as parseSourceName).
-function parseMarcaTemporal(s: string): { dateStr: string; dateMs: number } | null {
-  if (!s || typeof s !== 'string') return null;
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+// Parse "Marca temporal" into { dateStr, dateMs } or null.
+// Accepts both: plain string ("YYYY-MM-DD HH:MM:SS.mmm" or ISO) AND Date objects
+// — pg returns the column as a JS Date because in Neon it's a `timestamp` type.
+function parseMarcaTemporal(v: any): { dateStr: string; dateMs: number } | null {
+  if (v == null) return null;
+  let iso: string;
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    iso = v.toISOString();                     // "YYYY-MM-DDTHH:MM:SS.mmmZ"
+  } else if (typeof v === 'string') {
+    iso = v;
+  } else {
+    return null;
+  }
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return null;
-  const dateStr = `${m[1]}-${m[2]}-${m[3]}`;
-  return { dateStr, dateMs: Date.UTC(parseInt(m[1],10), parseInt(m[2],10) - 1, parseInt(m[3],10)) };
+  return {
+    dateStr: `${m[1]}-${m[2]}-${m[3]}`,
+    dateMs: Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)),
+  };
 }
 
 app.get('/api/qa', async (req, res) => {
@@ -353,27 +364,6 @@ app.get('/api/qa', async (req, res) => {
   } catch (error: any) {
     console.error('[qa] error:', error?.message);
     res.status(500).json({ error: 'Failed to fetch QA', detail: error?.message });
-  }
-});
-
-// Temporary diagnostic: dumps raw column names and first row of a Neon table.
-// Used to debug column-name / data-format mismatches. Remove once QA is verified.
-app.get('/api/_debug/table', async (req, res) => {
-  try {
-    const pool = await getPool();
-    if (!pool) return res.status(503).json({ error: 'Database not configured' });
-    const name = String(req.query.name || '');
-    if (!/^[A-Za-z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Bad table name' });
-    const r = await pool.query(`SELECT * FROM "${name}" LIMIT 3`);
-    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM "${name}"`);
-    res.json({
-      table: name,
-      totalRows: total.rows[0]?.n ?? null,
-      columns: r.fields?.map((f: any) => f.name) ?? [],
-      sample: r.rows,
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error?.message });
   }
 });
 
