@@ -505,6 +505,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
   // Still Open Cases — team-wide CAC indicator. Same number for everyone in CAC.
   const [dbStillOpen, setDbStillOpen] = React.useState<StillOpenRow[] | null>(null);
+
+  // ALL opened cases (no user filter). Powers the Backlog indicator's
+  // denominator (avg opened cases in the last 3 expired months). Loaded
+  // only when the scope is CAC.
+  const [dbOpenedAll, setDbOpenedAll] = React.useState<any[] | null>(null);
   const [selectedDept, setSelectedDept] = React.useState<string>('All');
 
   // Team calculations for Management - moved up for dependency access
@@ -558,13 +563,20 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         qaIds         = teamRfcs.map(rfc => users[rfc]?.qa        ).filter((c): c is string => !!c);
       }
 
-      // Opened/Closed cases via Abiertos
-      if (compassIds.length > 0) {
-        const cases = await fetchOpenedCases(undefined, startDate, endDate);
-        setDbCases(cases.filter(c => compassIds.includes(c.case_owner)));
-      } else {
-        setDbCases(null);
-      }
+      // Opened/Closed cases via Abiertos. The fetch returns the entire team's
+      // cases; we split it into:
+      //  - dbCases: filtered to the current user/team's compass IDs (powers
+      //    Opened/Closed/Closed Cases Rate per agent)
+      //  - dbOpenedAll: full unfiltered set (powers Backlog's monthly avg)
+      const scopeIsCAC =
+        currentUser.serviceDesk === 'CAC' ||
+        (isManagement && selectedDept === 'CAC');
+      const needCasesFetch = compassIds.length > 0 || scopeIsCAC;
+      const allCases = needCasesFetch ? await fetchOpenedCases(undefined, startDate, endDate) : null;
+      setDbCases(allCases && compassIds.length > 0
+        ? allCases.filter(c => compassIds.includes(c.case_owner))
+        : null);
+      setDbOpenedAll(allCases && scopeIsCAC ? allCases : null);
 
       // NSAT survey rows via NSAT table (same Compass join as Abiertos)
       if (compassIds.length > 0) {
@@ -590,14 +602,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         setDbQA(null);
       }
 
-      // Still Open Cases — CAC team-wide stat. Pulled when the *scope* is CAC:
-      //  - Agent / Leader whose serviceDesk is CAC
-      //  - Manager / Executive currently filtering to the CAC dept
-      // Non-CAC scopes leave dbStillOpen null → bucket value stays 0, so the
-      // line is empty for those users even if they pick the indicator.
-      const scopeIsCAC =
-        currentUser.serviceDesk === 'CAC' ||
-        (isManagement && selectedDept === 'CAC');
+      // Still Open Cases — CAC team-wide. Same scopeIsCAC computed above.
       if (scopeIsCAC) {
         const stillOpen = await fetchStillOpenCases(startDate, endDate);
         setDbStillOpen(stillOpen);
@@ -723,7 +728,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'Still Open Cases']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'Still Open Cases', 'Backlog']),
     []
   );
 
@@ -849,28 +854,70 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     //   2. For each bucket (week/month/year), use the snapshot of the LATEST
     //      day in that bucket that has data. For "day" hierarchy each bucket
     //      is one date so this collapses to the same daily count.
+    const stillOpenDaily: Record<string, number> = {};
+    const stillOpenLatestPerBucket: Record<string, string> = {};
     if (dbStillOpen) {
-      const dailyCounts: Record<string, number> = {};
       dbStillOpen.forEach(s => {
         const d = dayjs(s.dateStr);
         if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
-        dailyCounts[s.dateStr] = (dailyCounts[s.dateStr] || 0) + 1;
+        stillOpenDaily[s.dateStr] = (stillOpenDaily[s.dateStr] || 0) + 1;
       });
-
       // Keep the latest dateStr seen per bucket key; lexicographic compare on
       // YYYY-MM-DD is equivalent to date compare so no parsing needed.
-      const latestPerBucket: Record<string, string> = {};
-      Object.entries(dailyCounts).forEach(([dateStr, count]) => {
+      Object.entries(stillOpenDaily).forEach(([dateStr, count]) => {
         const k = dayjs(dateStr).format(formatStr);
-        if (!latestPerBucket[k] || dateStr > latestPerBucket[k]) {
-          latestPerBucket[k] = dateStr;
+        if (!stillOpenLatestPerBucket[k] || dateStr > stillOpenLatestPerBucket[k]) {
+          stillOpenLatestPerBucket[k] = dateStr;
           ensure(k)['Still Open Cases'] = count;
         }
       });
     }
 
-    return { out, qaByBucket, nsatByBucket };
-  }, [dbCases, dbActivity, dbQA, dbNSAT, dbStillOpen, hierarchy, startDate, endDate]);
+    // Backlog = Still Open Cases (snapshot of latest day in bucket) divided
+    // by the average monthly Opened Cases of the 3 most recently EXPIRED
+    // months (whose last-day is strictly before the snapshot date). Displayed
+    // as an integer percentage. If the 3 prior months have no data combined,
+    // the bucket stays out of backlogByBucket → null on the chart.
+    const backlogByBucket: Record<string, number> = {};
+    if (dbStillOpen && dbOpenedAll && dbOpenedAll.length > 0) {
+      // Monthly team-wide opened-cases counts (no user filter).
+      const openedMonthly: Record<string, number> = {};
+      dbOpenedAll.forEach(c => {
+        const s: string = c?.datetime_opened || '';
+        const parts = s.split(' ')[0].split('/');
+        if (parts.length !== 3) return;
+        const y = parts[2];
+        const m = parts[0].padStart(2, '0');
+        const key = `${y}-${m}`;
+        openedMonthly[key] = (openedMonthly[key] || 0) + 1;
+      });
+
+      const expiredMonthsBefore = (refDateStr: string): string[] => {
+        const ref = dayjs(refDateStr);
+        if (!ref.isValid()) return [];
+        const out: string[] = [];
+        let m = ref.startOf('month').subtract(1, 'month');
+        let safety = 0;
+        while (out.length < 3 && safety < 36) {
+          safety++;
+          if (m.endOf('month').isBefore(ref, 'day')) out.push(m.format('YYYY-MM'));
+          m = m.subtract(1, 'month');
+        }
+        return out;
+      };
+
+      Object.entries(stillOpenLatestPerBucket).forEach(([bucketKey, refDate]) => {
+        const so = stillOpenDaily[refDate];
+        const priors = expiredMonthsBefore(refDate);
+        const sum = priors.reduce((acc, m) => acc + (openedMonthly[m] || 0), 0);
+        if (sum <= 0) return; // null → gap
+        const avg = sum / 3;
+        backlogByBucket[bucketKey] = Math.round((so / avg) * 100);
+      });
+    }
+
+    return { out, qaByBucket, nsatByBucket, backlogByBucket };
+  }, [dbCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
@@ -897,6 +944,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     Object.keys(dbTrendByBucket.out).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.qaByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.nsatByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.backlogByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
       const entry: any = {
@@ -906,9 +954,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       };
 
       selectedIndicators.forEach(indicator => {
-        // QA and NSAT are computed indicators that should leave a gap when
-        // there's no source data in the bucket — null lets Recharts skip
-        // the point. (We also opt these two into connectNulls below.)
+        // QA, NSAT and Backlog are computed indicators that should leave a
+        // gap when there's no source data in the bucket — null lets Recharts
+        // skip the point. (These three opt into connectNulls below.)
         if (indicator === 'QA') {
           const v = dbTrendByBucket.qaByBucket[key];
           entry[indicator] = v !== undefined ? v : null;
@@ -916,6 +964,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         }
         if (indicator === 'NSAT') {
           const v = dbTrendByBucket.nsatByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        if (indicator === 'Backlog') {
+          const v = dbTrendByBucket.backlogByBucket[key];
           entry[indicator] = v !== undefined ? v : null;
           return;
         }
@@ -1267,7 +1320,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // KPIs are aggregate scores computed from several indicators.
     { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
     // Indicators are values that come directly from a single source table.
-    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Still Open Cases', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
+    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Still Open Cases', 'Backlog', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
   ];
 
   const getKpiColor = (val: number) => {
@@ -1642,8 +1695,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
                       formatter={(val: any, name: string) => {
                         if (val == null) return ['—', name];
-                        if (name === 'QA')   return [`${formatValue(val)}%`, name];
-                        if (name === 'NSAT') return [String(formatValue(val, true)), name]; // -100…+100 integer, no %
+                        if (name === 'QA')      return [`${formatValue(val)}%`, name];
+                        if (name === 'NSAT')    return [String(formatValue(val, true)), name]; // -100…+100 integer, no %
+                        if (name === 'Backlog') return [`${formatValue(val, true)}%`, name];   // integer %
                         const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name)
                           || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si));
                         return [formatValue(val, isInt), name];
@@ -1670,7 +1724,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
-                          connectNulls={indicator === 'QA' || indicator === 'NSAT'}
+                          connectNulls={indicator === 'QA' || indicator === 'NSAT' || indicator === 'Backlog'}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
@@ -1685,8 +1739,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                               }}
                               formatter={(val: any) => {
                                 if (val == null) return '';
-                                if (indicator === 'QA')   return `${formatValue(val)}%`;
-                                if (indicator === 'NSAT') return String(formatValue(val, true));
+                                if (indicator === 'QA')      return `${formatValue(val)}%`;
+                                if (indicator === 'NSAT')    return String(formatValue(val, true));
+                                if (indicator === 'Backlog') return `${formatValue(val, true)}%`;
                                 return formatValue(val);
                               }}
                             />
