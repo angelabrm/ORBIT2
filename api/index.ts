@@ -509,20 +509,22 @@ app.get('/api/nsat', async (req, res) => {
     //   Q1 = agent_satisfaction_score
     //   Q2 = effort_score
     //   Q3 = overall_satisfaction_score
-    // NSAT and NSAT_Premium share schema + join key (case_owner ↔ Roster.Compass)
-    // and the same formula. Premium agents live in NSAT_Premium; the rest in NSAT.
-    const cols = '"case_owner", "datetime_closed", "agent_satisfaction_score", "effort_score", "overall_satisfaction_score"';
-    const queryTable = async (table: string): Promise<any[]> => {
+    // Both tables share schema + scoring formula but use DIFFERENT join columns:
+    //   NSAT.case_owner          ↔ Roster.Compass
+    //   NSAT_Premium.agent_full_name ↔ Roster.Compass
+    // We alias the join column to "_owner" so downstream processing is uniform.
+    const dataCols = '"datetime_closed", "agent_satisfaction_score", "effort_score", "overall_satisfaction_score"';
+    const queryTable = async (table: string, joinCol: string): Promise<any[]> => {
       try {
         let r;
         if (userList.length > 0) {
           const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
           r = await pool.query(
-            `SELECT ${cols} FROM "${table}" WHERE "case_owner" IN (${placeholders})`,
+            `SELECT "${joinCol}" AS "_owner", ${dataCols} FROM "${table}" WHERE "${joinCol}" IN (${placeholders})`,
             userList,
           );
         } else {
-          r = await pool.query(`SELECT ${cols} FROM "${table}"`);
+          r = await pool.query(`SELECT "${joinCol}" AS "_owner", ${dataCols} FROM "${table}"`);
         }
         return r.rows;
       } catch (err: any) {
@@ -532,8 +534,8 @@ app.get('/api/nsat', async (req, res) => {
     };
 
     const [base, premium] = await Promise.all([
-      queryTable('NSAT'),
-      queryTable('NSAT_Premium'),
+      queryTable('NSAT',         'case_owner'),
+      queryTable('NSAT_Premium', 'agent_full_name'),
     ]);
     const rows = [...base, ...premium];
 
@@ -551,7 +553,7 @@ app.get('/api/nsat', async (req, res) => {
         const p = parseDateFlex(r['datetime_closed']);
         if (p === null) return null;
         return {
-          caseOwner: r['case_owner'],
+          caseOwner: r['_owner'],
           dateStr: p.dateStr,
           dateMs: p.dateMs,
           q1: toScore(r['agent_satisfaction_score']),
