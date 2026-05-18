@@ -534,20 +534,24 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const loadDbData = async () => {
       if (!currentUser) return;
 
-      // Three independent joins on the Roster:
-      //  - Compass    → Abiertos."case_owner"   (Opened / Closed cases)
-      //  - CallPicker → Actividad."User"        (Incoming calls)
-      //  - QA         → QA."Agente"             (QA records)
+      // Four independent joins on the Roster:
+      //  - Compass    → Abiertos."case_owner"                  (Opened/Closed cases, NSAT)
+      //  - CallPicker → Actividad."User"                        (Incoming calls, source 1)
+      //  - Genesys    → Rendimiento_Agente."nombre_del_agente"  (Incoming calls, source 2 — summed)
+      //  - QA         → QA."Agente" / QA_Premium."Agent"        (QA records)
       let compassIds: string[] = [];
       let callPickerIds: string[] = [];
+      let genesysIds: string[] = [];
       let qaIds: string[] = [];
       if (currentUser.role === 'Agent') {
         if (currentUser.compass)    compassIds    = [currentUser.compass];
         if (currentUser.callPicker) callPickerIds = [currentUser.callPicker];
+        if (currentUser.genesys)    genesysIds    = [currentUser.genesys];
         if (currentUser.qa)         qaIds         = [currentUser.qa];
       } else if (isManagement) {
         compassIds    = teamRfcs.map(rfc => users[rfc]?.compass   ).filter((c): c is string => !!c);
         callPickerIds = teamRfcs.map(rfc => users[rfc]?.callPicker).filter((c): c is string => !!c);
+        genesysIds    = teamRfcs.map(rfc => users[rfc]?.genesys   ).filter((c): c is string => !!c);
         qaIds         = teamRfcs.map(rfc => users[rfc]?.qa        ).filter((c): c is string => !!c);
       }
 
@@ -567,9 +571,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         setDbNSAT(null);
       }
 
-      // Incoming calls via Actividad
-      if (callPickerIds.length > 0) {
-        const activity = await fetchIncomingCalls(callPickerIds, startDate, endDate);
+      // Incoming calls via Actividad + Rendimiento_Agente (summed)
+      if (callPickerIds.length > 0 || genesysIds.length > 0) {
+        const activity = await fetchIncomingCalls(callPickerIds, startDate, endDate, genesysIds);
         setDbActivity(activity);
       } else {
         setDbActivity(null);

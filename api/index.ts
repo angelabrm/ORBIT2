@@ -45,6 +45,7 @@ interface RosterUser {
   compass?: string;
   callPicker?: string;
   qa?: string;
+  genesys?: string;
   name: string;
   role: string;
   client: string;
@@ -115,6 +116,7 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
   const compassCol    = col('Compass');
   const callPickerCol = col('CallPicker');
   const qaCol         = col('QA');
+  const genesysCol    = col('Genesys');
   const nombreCol     = col('Nombre');
   const nivelCol      = col('Nivel');
   const mesaCol       = col('MESA_');
@@ -128,13 +130,14 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
       const compass    = compassCol    >= 0 ? (row[compassCol]?.trim()    || undefined) : undefined;
       const callPicker = callPickerCol >= 0 ? (row[callPickerCol]?.trim() || undefined) : undefined;
       const qa         = qaCol         >= 0 ? (row[qaCol]?.trim()         || undefined) : undefined;
+      const genesys    = genesysCol    >= 0 ? (row[genesysCol]?.trim()    || undefined) : undefined;
       const nombre = row[nombreCol]?.trim() || '';
       const nivel = row[nivelCol]?.trim() || '';
       const mesa = row[mesaCol]?.trim() || '';
       const clientVal = row[clientCol]?.trim() || '';
       const role = mapRole(nivel);
       if (!role || !rfc) return null;
-      return { rfc, compass, callPicker, qa, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
+      return { rfc, compass, callPicker, qa, genesys, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
     })
     .filter(Boolean) as RosterUser[];
 
@@ -242,49 +245,88 @@ app.get('/api/incoming-calls', async (req, res) => {
     const pool = await getPool();
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
 
-    const { user, startDate, endDate } = req.query as { user?: string; startDate?: string; endDate?: string };
+    const { user, genesys, startDate, endDate } = req.query as {
+      user?: string;
+      genesys?: string;
+      startDate?: string;
+      endDate?: string;
+    };
 
-    // user is a CSV of CallPicker values. Build a parameterised IN clause.
-    const userList = (user || '')
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
+    // Incoming Calls comes from two tables, joined on different Roster columns:
+    //   Actividad.User                  ↔ Roster.CallPicker  (param: ?user=)
+    //   Rendimiento_Agente.nombre_del_agente ↔ Roster.Genesys (param: ?genesys=)
+    // Values from both sources are SUMMED per bucket on the frontend.
+    const callPickerList = (user    || '').split(',').map(s => s.trim()).filter(Boolean);
+    const genesysList    = (genesys || '').split(',').map(s => s.trim()).filter(Boolean);
 
-    let rows: any[];
-    if (userList.length > 0) {
-      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
-      const r = await pool.query(
-        `SELECT "User", "Answered Calls", "Source.Name" FROM "Actividad" WHERE "User" IN (${placeholders})`,
-        userList,
-      );
-      rows = r.rows;
-    } else {
-      const r = await pool.query('SELECT "User", "Answered Calls", "Source.Name" FROM "Actividad"');
-      rows = r.rows;
-    }
+    const queryActividad = async (): Promise<any[]> => {
+      try {
+        let r;
+        if (callPickerList.length > 0) {
+          const placeholders = callPickerList.map((_, i) => `$${i + 1}`).join(',');
+          r = await pool.query(
+            `SELECT "User", "Answered Calls", "Source.Name" FROM "Actividad" WHERE "User" IN (${placeholders})`,
+            callPickerList,
+          );
+        } else {
+          r = await pool.query('SELECT "User", "Answered Calls", "Source.Name" FROM "Actividad"');
+        }
+        return r.rows.map((row: any) => {
+          const p = parseSourceName(row['Source.Name']);
+          if (p === null) return null;
+          return {
+            user: row['User'],
+            source: row['Source.Name'],
+            dateStr: p.dateStr,
+            dateMs: p.dateMs,
+            answeredCalls: Number(row['Answered Calls']) || 0,
+          };
+        }).filter((x: any) => x !== null);
+      } catch (e: any) {
+        console.warn(`[incoming-calls] Actividad unavailable: ${e?.message}`);
+        return [];
+      }
+    };
 
-    // Attach parsed date + filter by range (day-inclusive, same convention as /api/opened-cases).
+    const queryRendimiento = async (): Promise<any[]> => {
+      try {
+        let r;
+        if (genesysList.length > 0) {
+          const placeholders = genesysList.map((_, i) => `$${i + 1}`).join(',');
+          r = await pool.query(
+            `SELECT "nombre_del_agente", "Contestadas", "inicio_del_intervalo" FROM "Rendimiento_Agente" WHERE "nombre_del_agente" IN (${placeholders})`,
+            genesysList,
+          );
+        } else {
+          r = await pool.query('SELECT "nombre_del_agente", "Contestadas", "inicio_del_intervalo" FROM "Rendimiento_Agente"');
+        }
+        return r.rows.map((row: any) => {
+          const p = parseDateFlex(row['inicio_del_intervalo']);
+          if (p === null) return null;
+          return {
+            user: row['nombre_del_agente'],
+            source: 'Rendimiento_Agente',
+            dateStr: p.dateStr,
+            dateMs: p.dateMs,
+            answeredCalls: Number(row['Contestadas']) || 0,
+          };
+        }).filter((x: any) => x !== null);
+      } catch (e: any) {
+        console.warn(`[incoming-calls] Rendimiento_Agente unavailable: ${e?.message}`);
+        return [];
+      }
+    };
+
+    const [actividad, rendimiento] = await Promise.all([queryActividad(), queryRendimiento()]);
+
+    // Apply date-range filter (day-inclusive, same convention as /api/opened-cases).
     const start = startDate ? Date.parse(startDate) : null;
     const end   = endDate   ? Date.parse(endDate)   : null;
-
-    const out = rows
-      .map(r => {
-        const p = parseSourceName(r['Source.Name']);
-        if (p === null) return null;
-        return {
-          user: r['User'],
-          source: r['Source.Name'],
-          dateStr: p.dateStr,                          // "YYYY-MM-DD" — use this for bucketing
-          dateMs: p.dateMs,                            // UTC ms — for legacy callers
-          answeredCalls: Number(r['Answered Calls']) || 0,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-      .filter(r => {
-        if (start !== null && r.dateMs < start - 86400000) return false;
-        if (end   !== null && r.dateMs > end   + 86400000) return false;
-        return true;
-      });
+    const out = [...actividad, ...rendimiento].filter(r => {
+      if (start !== null && r.dateMs < start - 86400000) return false;
+      if (end   !== null && r.dateMs > end   + 86400000) return false;
+      return true;
+    });
 
     res.json(out);
   } catch (error: any) {

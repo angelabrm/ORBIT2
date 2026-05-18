@@ -32,10 +32,16 @@ export interface IncomingCallRow {
   answeredCalls: number;
 }
 
-export const fetchIncomingCalls = async (callPickers?: string[], startDate?: any, endDate?: any): Promise<IncomingCallRow[]> => {
+export const fetchIncomingCalls = async (
+  callPickers?: string[],
+  startDate?: any,
+  endDate?: any,
+  genesysIds?: string[],
+): Promise<IncomingCallRow[]> => {
   try {
     const params = new URLSearchParams();
     if (callPickers && callPickers.length > 0) params.append('user', callPickers.join(','));
+    if (genesysIds && genesysIds.length > 0)   params.append('genesys', genesysIds.join(','));
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
 

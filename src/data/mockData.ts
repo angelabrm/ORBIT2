@@ -9,7 +9,8 @@ export interface User {
   rfc: string;
   compass?: string;     // Matches Abiertos."case_owner" (Opened/Closed cases)
   callPicker?: string;  // Matches Actividad."User" (Incoming calls)
-  qa?: string;          // Matches QA."Agente" (QA records)
+  qa?: string;          // Matches QA."Agente" / QA_Premium."Agent" (QA records)
+  genesys?: string;     // Matches Rendimiento_Agente."nombre_del_agente" (extra Incoming Calls source)
   name: string;
   role: Role;
   client: "Stellantis" | "Pepsico";
