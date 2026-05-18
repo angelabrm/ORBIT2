@@ -290,15 +290,17 @@ app.get('/api/incoming-calls', async (req, res) => {
 
     const queryRendimiento = async (): Promise<any[]> => {
       try {
+        // Column names in Neon are all-lowercase ("contestadas", not
+        // "Contestadas") and Postgres is case-sensitive inside double quotes.
         let r;
         if (genesysList.length > 0) {
           const placeholders = genesysList.map((_, i) => `$${i + 1}`).join(',');
           r = await pool.query(
-            `SELECT "nombre_del_agente", "Contestadas", "inicio_del_intervalo" FROM "Rendimiento_Agente" WHERE "nombre_del_agente" IN (${placeholders})`,
+            `SELECT "nombre_del_agente", "contestadas", "inicio_del_intervalo" FROM "Rendimiento_Agente" WHERE "nombre_del_agente" IN (${placeholders})`,
             genesysList,
           );
         } else {
-          r = await pool.query('SELECT "nombre_del_agente", "Contestadas", "inicio_del_intervalo" FROM "Rendimiento_Agente"');
+          r = await pool.query('SELECT "nombre_del_agente", "contestadas", "inicio_del_intervalo" FROM "Rendimiento_Agente"');
         }
         return r.rows.map((row: any) => {
           const p = parseDateFlex(row['inicio_del_intervalo']);
@@ -308,7 +310,7 @@ app.get('/api/incoming-calls', async (req, res) => {
             source: 'Rendimiento_Agente',
             dateStr: p.dateStr,
             dateMs: p.dateMs,
-            answeredCalls: Number(row['Contestadas']) || 0,
+            answeredCalls: Number(row['contestadas']) || 0,
           };
         }).filter((x: any) => x !== null);
       } catch (e: any) {
@@ -614,27 +616,6 @@ app.get('/api/nsat', async (req, res) => {
   } catch (error: any) {
     console.error('[nsat] error:', error?.message);
     res.status(500).json({ error: 'Failed to fetch NSAT', detail: error?.message });
-  }
-});
-
-// Temporary diagnostic: dumps columns and a sample row for any Neon table.
-// Used to debug column-name / data-format mismatches. Remove once verified.
-app.get('/api/_debug/table', async (req, res) => {
-  try {
-    const pool = await getPool();
-    if (!pool) return res.status(503).json({ error: 'Database not configured' });
-    const name = String(req.query.name || '');
-    if (!/^[A-Za-z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Bad table name' });
-    const r = await pool.query(`SELECT * FROM "${name}" LIMIT 3`);
-    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM "${name}"`);
-    res.json({
-      table: name,
-      totalRows: total.rows[0]?.n ?? null,
-      columns: r.fields?.map((f: any) => f.name) ?? [],
-      sample: r.rows,
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error?.message });
   }
 });
 
