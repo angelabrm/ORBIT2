@@ -20,7 +20,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
-import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow, fetchNSAT, NSATRow } from '../../services/apiService';
+import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow, fetchNSAT, NSATRow, fetchStillOpenCases, StillOpenRow } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
@@ -502,6 +502,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
   // Real NSAT rows from Neon, joined on this user/team's Compass IDs
   const [dbNSAT, setDbNSAT] = React.useState<NSATRow[] | null>(null);
+
+  // Still Open Cases — team-wide CAC indicator. Same number for everyone in CAC.
+  const [dbStillOpen, setDbStillOpen] = React.useState<StillOpenRow[] | null>(null);
   const [selectedDept, setSelectedDept] = React.useState<string>('All');
 
   // Team calculations for Management - moved up for dependency access
@@ -586,9 +589,24 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       } else {
         setDbQA(null);
       }
+
+      // Still Open Cases — CAC team-wide stat. Pulled when the *scope* is CAC:
+      //  - Agent / Leader whose serviceDesk is CAC
+      //  - Manager / Executive currently filtering to the CAC dept
+      // Non-CAC scopes leave dbStillOpen null → bucket value stays 0, so the
+      // line is empty for those users even if they pick the indicator.
+      const scopeIsCAC =
+        currentUser.serviceDesk === 'CAC' ||
+        (isManagement && selectedDept === 'CAC');
+      if (scopeIsCAC) {
+        const stillOpen = await fetchStillOpenCases(startDate, endDate);
+        setDbStillOpen(stillOpen);
+      } else {
+        setDbStillOpen(null);
+      }
     };
     loadDbData();
-  }, [currentUser, startDate, endDate, teamRfcs, isManagement]);
+  }, [currentUser, startDate, endDate, teamRfcs, isManagement, selectedDept]);
 
   const stats = React.useMemo(() => {
     if (!currentUser) return null;
@@ -705,7 +723,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'Still Open Cases']),
     []
   );
 
@@ -717,6 +735,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       'Closed Cases': number;
       'Closed Cases Rate': number;
       'Incoming Calls': number;
+      'Still Open Cases': number;
     };
     const out: Record<string, Bucket> = {};
     const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
@@ -725,7 +744,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const FMT = 'M/D/YYYY h:mm A';
 
     const ensure = (k: string): Bucket => {
-      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0 };
+      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0, 'Still Open Cases': 0 };
       return out[k];
     };
 
@@ -823,8 +842,18 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
+    // Still Open Cases → COUNT of Aun_Abiertos rows per bucket. Team-wide for
+    // CAC; not user-filtered.
+    if (dbStillOpen) {
+      dbStillOpen.forEach(s => {
+        const d = dayjs(s.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        ensure(d.format(formatStr))['Still Open Cases']++;
+      });
+    }
+
     return { out, qaByBucket, nsatByBucket };
-  }, [dbCases, dbActivity, dbQA, dbNSAT, hierarchy, startDate, endDate]);
+  }, [dbCases, dbActivity, dbQA, dbNSAT, dbStillOpen, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
@@ -1221,7 +1250,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // KPIs are aggregate scores computed from several indicators.
     { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
     // Indicators are values that come directly from a single source table.
-    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
+    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Still Open Cases', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
   ];
 
   const getKpiColor = (val: number) => {

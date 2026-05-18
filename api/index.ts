@@ -619,6 +619,40 @@ app.get('/api/nsat', async (req, res) => {
   }
 });
 
+// Still Open Cases: a CAC-team-wide count (not per-user). Returns every row
+// of Aun_Abiertos within the date range as { dateStr, dateMs }. The frontend
+// counts rows per bucket. No user filter — the entire table is CAC by spec.
+app.get('/api/still-open-cases', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const r = await pool.query('SELECT "fecha_en_que_esta_abierto" FROM "Aun_Abiertos"');
+
+    const start = startDate ? Date.parse(startDate) : null;
+    const end   = endDate   ? Date.parse(endDate)   : null;
+
+    const out = r.rows
+      .map((row: any) => {
+        const p = parseDateFlex(row['fecha_en_que_esta_abierto']);
+        if (p === null) return null;
+        return { dateStr: p.dateStr, dateMs: p.dateMs };
+      })
+      .filter((x: any): x is NonNullable<typeof x> => x !== null)
+      .filter((x: any) => {
+        if (start !== null && x.dateMs < start - 86400000) return false;
+        if (end   !== null && x.dateMs > end   + 86400000) return false;
+        return true;
+      });
+
+    res.json(out);
+  } catch (error: any) {
+    console.error('[still-open-cases] error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch Still Open Cases', detail: error?.message });
+  }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });

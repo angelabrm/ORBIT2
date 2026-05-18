@@ -102,6 +102,26 @@ export const fetchNSAT = async (compassIds?: string[], startDate?: any, endDate?
   }
 };
 
+export interface StillOpenRow {
+  dateStr: string;
+  dateMs: number;
+}
+
+export const fetchStillOpenCases = async (startDate?: any, endDate?: any): Promise<StillOpenRow[]> => {
+  try {
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', dayjs(startDate).toISOString());
+    if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
+
+    const response = await fetch(`/api/still-open-cases?${params.toString()}`);
+    if (!response.ok) throw new Error('Failed to fetch from API');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching Still Open Cases:', error);
+    return [];
+  }
+};
+
 export const checkApiHealth = async () => {
   try {
     const response = await fetch('/api/health');
