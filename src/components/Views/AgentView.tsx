@@ -842,13 +842,30 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    // Still Open Cases → COUNT of Aun_Abiertos rows per bucket. Team-wide for
-    // CAC; not user-filtered.
+    // Still Open Cases is a SNAPSHOT metric (current backlog), not a flow.
+    // Summing across days would be meaningless — a case still open on Mon and
+    // Tue would be counted twice. Instead:
+    //   1. Count rows per day (daily snapshot size).
+    //   2. For each bucket (week/month/year), use the snapshot of the LATEST
+    //      day in that bucket that has data. For "day" hierarchy each bucket
+    //      is one date so this collapses to the same daily count.
     if (dbStillOpen) {
+      const dailyCounts: Record<string, number> = {};
       dbStillOpen.forEach(s => {
         const d = dayjs(s.dateStr);
         if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
-        ensure(d.format(formatStr))['Still Open Cases']++;
+        dailyCounts[s.dateStr] = (dailyCounts[s.dateStr] || 0) + 1;
+      });
+
+      // Keep the latest dateStr seen per bucket key; lexicographic compare on
+      // YYYY-MM-DD is equivalent to date compare so no parsing needed.
+      const latestPerBucket: Record<string, string> = {};
+      Object.entries(dailyCounts).forEach(([dateStr, count]) => {
+        const k = dayjs(dateStr).format(formatStr);
+        if (!latestPerBucket[k] || dateStr > latestPerBucket[k]) {
+          latestPerBucket[k] = dateStr;
+          ensure(k)['Still Open Cases'] = count;
+        }
       });
     }
 
