@@ -193,7 +193,7 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 - Capa de datos mock Pepsico centralizada en `pepsicoMockData.ts` — seeded por RFC, garantiza consistencia entre PMView y PepsicoManagerView
 - Pestaña Financial del Executive con datos de Stellantis y Pepsico
 - Backend Express con endpoint de casos abiertos (Neon PostgreSQL)
-- **Migración progresiva mock → Neon (Stellantis):** seis indicadores del line chart de `AgentView` ya provienen de Neon — `Opened Cases`, `Closed Cases`, `Closed Cases Rate`, `Incoming Calls`, `QA`, `NSAT`. Ver §11 para fórmulas, joins y formato por indicador
+- **Migración progresiva mock → Neon (Stellantis):** ocho indicadores del line chart de `AgentView` ya provienen de Neon — `Opened Cases`, `Closed Cases`, `Closed Cases Rate`, `Incoming Calls` (suma de dos tablas), `QA` (merge de dos tablas), `NSAT` (merge de dos tablas), y dos indicadores grupales CAC: `Still Open Cases` y `Backlog`. Ver §11 para fórmulas, joins y formato por indicador
 - Despliegue en Vercel con `api/index.ts` como serverless function en `orbit-2-weld.vercel.app`. `engines.node` pineado a `22.x`, `@neondatabase/serverless` eliminado del path de cold start, `pg` y `dayjs` cargados lazy desde dentro de los handlers
 - Rango de fechas default del dashboard: últimos 12 meses rolling (`dayjs().subtract(12, 'month').startOf('month')` → `dayjs()`), garantiza que los datos reales de BD entren en ventana al cargar
 - Aislamiento de sesión al cerrar
@@ -205,8 +205,8 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 | `ExecutiveView` activa | Conectar `ExecutiveView.tsx` al routing de `Dashboard.tsx` |
 | Fuente de datos campañas Pepsico | Reemplazar el mock de campañas con la fuente real (fases, tasks, fechas, estados) |
 | Control de acceso backend | Validación de rol/cliente en endpoints de la API |
-| Migración mock → Neon (siguientes indicadores) | Faltan por migrar al line chart: `Performance`, `Productivity`, `Ranking`, `Bonus`, `NSAT Information`, `NSAT Claims`, `Outgoing Calls`, `% First Contact Resolution`, `Backlog Team`. Misma técnica: agregar al `Set DB_INDICATORS` en `AgentView.tsx` + extender `dbTrendByBucket`. Los KPI cards superiores también siguen en mock |
-| Mapeo completo de joins en Roster | Sigue habiendo filas del Google Sheet con nombre real en `Compass` / `CallPicker` / `QA` en vez del identificador `User X`. Esos usuarios reciben 0 datos del indicador correspondiente hasta que se les complete el mapeo |
+| Migración mock → Neon (siguientes indicadores) | Faltan por migrar al line chart: `Performance`, `Productivity`, `Ranking`, `Bonus`, `NSAT Information`, `NSAT Claims`, `Outgoing Calls`, `% First Contact Resolution`, `Backlog Team` (legacy mock distinto del `Backlog` real CAC). Misma técnica: agregar al `Set DB_INDICATORS` en `AgentView.tsx` + extender `dbTrendByBucket`. Los KPI cards superiores también siguen en mock |
+| Mapeo completo de joins en Roster | Sigue habiendo filas del Google Sheet con nombre real en `Compass` / `CallPicker` / `QA` / `Genesys` en vez del identificador `User X`. Esos usuarios reciben 0 datos del indicador correspondiente hasta que se les complete el mapeo. Para `Backlog` y `Still Open Cases` no aplica porque son grupales |
 | Bug `ProjectManagerView.tsx:93` | Filtra cases por `rfcs.includes(c.case_owner)` pero `case_owner` es Compass, no RFC. Mismo bug ya corregido en `AgentView.tsx` |
 | Day-inclusive margin en `/api/opened-cases` | El backend agrega ±1 día al filtro de fechas (línea `t < start - 86400000`). Si el usuario pone start=end=15-Abr-2026 devuelve casos del 14, 15 y 16. Útil como tolerancia de timezone pero impreciso |
 
@@ -363,18 +363,20 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 
 ### Indicadores ya en Neon
 
-| Indicador | Tabla fuente | Join | Agregación por bucket | Display |
+| Indicador | Tabla(s) fuente | Join | Agregación por bucket | Display |
 |---|---|---|---|---|
 | `Opened Cases` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | COUNT de filas con `datetime_opened` en el bucket | entero |
 | `Closed Cases` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | COUNT de filas con `datetime_closed` en el bucket | entero |
 | `Closed Cases Rate` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | (Closed/Opened) × 100 por bucket | decimal |
-| `Incoming Calls` | `Actividad` | `User` ↔ `Roster.CallPicker` | SUM de `Answered Calls` (no count). Fecha viene de parsear `Source.Name` con formato `Actividad_YYYY_MM_DD.csv` | entero |
-| `QA` | `QA` + `QA_Premium` (merged) | `Agente` (QA) o `Agent` (QA_Premium) ↔ `Roster.QA` | AVG de score por fila. Score = suma ponderada de 10 criterios (5 × 16 pts soft skills + 5 × 4 pts process) con penalty all-or-nothing por `Error Crítico`/`Critical Error`. Premium tiene reglas levemente distintas: textos en inglés, "NA" cuenta como crédito completo en criterios. Filas sin evaluaciones → bucket ausente (gap en línea, conectado por `connectNulls`) | porcentaje `92.8%` |
-| `NSAT` | `NSAT` | `case_owner` ↔ `Roster.Compass` | NPS-style Index: por cada Q (Q1=`agent_satisfaction_score`, Q2=`effort_score`, Q3=`overall_satisfaction_score`), `((promotores − detractores) / total) × 100`. Promotores = 9–10, detractores = 1–6, pasivos = 7–8. Index = promedio de las 3 Qs. Buckets sin respuestas → gap conectado | entero `[-100, +100]` (sin `%`) |
+| `Incoming Calls` | `Actividad` + `Rendimiento_Agente` (sumadas) | Actividad: `User` ↔ `Roster.CallPicker` (fecha en `Source.Name = Actividad_YYYY_MM_DD.csv`, valor en `Answered Calls`). Rendimiento_Agente: `nombre_del_agente` ↔ `Roster.Genesys` (fecha en `inicio_del_intervalo`, valor en `contestadas` lowercase) | SUM de ambos valores por bucket | entero |
+| `QA` | `QA` + `QA_Premium` (merged) | `Agente` (QA) o `Agent` (QA_Premium) ↔ `Roster.QA` | AVG de score por fila. Score = suma ponderada de 10 criterios (5 × 16 pts soft skills + 5 × 4 pts process) con penalty all-or-nothing por `Error Crítico`/`Critical Error`. Premium: textos en inglés, "NA" cuenta como crédito completo en criterios. Buckets sin evaluaciones → gap conectado | porcentaje `92.8%` |
+| `NSAT` | `NSAT` + `NSAT_Premium` (merged) | NSAT: `case_owner` ↔ `Roster.Compass`. NSAT_Premium: `agent_full_name` ↔ `Roster.Compass` (mismas columnas Q1/Q2/Q3, misma escala 1–10) | NPS-style Index: por cada Q (Q1=`agent_satisfaction_score`, Q2=`effort_score`, Q3=`overall_satisfaction_score`), `((promotores − detractores) / total) × 100`. Promotores = 9–10, detractores = 1–6, pasivos = 7–8. Index = promedio de las 3 Qs. Buckets sin respuestas → gap conectado | entero `[-100, +100]` (sin `%`) |
+| `Still Open Cases` ⚙️ team-wide CAC | `Aun_Abiertos` | sin join — la tabla entera es CAC por construcción | Daily count primero, luego **snapshot del último día con data en el bucket** (no SUM; es backlog, no flujo). Para hierarchy `day` colapsa al count diario. Bucketing visible solo cuando `scopeIsCAC` | entero |
+| `Backlog` ⚙️ team-wide CAC | `Aun_Abiertos` + `Abiertos` (no filtrado por usuario) | sin join — combinación de Still Open snapshot y monthly totales de Opened Cases del equipo entero | `(Still Open Cases en el último día del bucket) / (avg de Opened Cases en los 3 meses cuyo último día es estrictamente anterior al snapshot)`. Si los 3 priors suman 0 → bucket ausente → gap conectado | entero `%` |
 
 ### Indicadores aún en mock (por migrar)
 
-`Performance`, `Productivity`, `Ranking`, `Bonus` (todos KPIs derivados — necesitan que los indicadores base estén en Neon primero), `NSAT Information`, `NSAT Claims`, `Outgoing Calls`, `% First Contact Resolution`, `Backlog Team`.
+`Performance`, `Productivity`, `Ranking`, `Bonus` (todos KPIs derivados — necesitan que los indicadores base estén en Neon primero), `NSAT Information`, `NSAT Claims`, `Outgoing Calls`, `% First Contact Resolution`, `Backlog Team` (no confundir con el nuevo `Backlog` real CAC).
 
 ### Patrones técnicos del backend
 
@@ -389,11 +391,14 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 
 ### Patrones técnicos del frontend (`AgentView.tsx`)
 
-- `dbTrendByBucket` retorna `{ out, qaByBucket, nsatByBucket }`:
-  - `out` — buckets con valores tipo COUNT (0 es legítimo)
-  - `qaByBucket`, `nsatByBucket` — buckets con valores tipo AVG/INDEX (bucket ausente = sin datos → null en el chart)
-- En el render del `<Line>`: `connectNulls={indicator === 'QA' || indicator === 'NSAT'}` para que la línea atraviese los gaps
-- Tooltip y `LabelList` aplican formato por indicador: `% suffix` para QA, entero raw para NSAT, defaults para counts
+- `dbTrendByBucket` retorna `{ out, qaByBucket, nsatByBucket, backlogByBucket }`:
+  - `out` — buckets con valores tipo COUNT/SUM/SNAPSHOT (0 es legítimo). Incluye Opened, Closed, Incoming Calls, Still Open Cases.
+  - `qaByBucket`, `nsatByBucket`, `backlogByBucket` — buckets con valores tipo AVG / INDEX / RATIO (bucket ausente = sin datos → null en el chart, **gap visible con línea conectada**).
+- `<Line connectNulls={indicator === 'QA' || indicator === 'NSAT' || indicator === 'Backlog'}>` para los tres con gaps esperables.
+- Tooltip y `LabelList` formatean por indicador: `% suffix` para QA y Backlog, entero raw para NSAT (-100..+100), defaults para counts.
+- `scopeIsCAC` gate: indicadores grupales CAC (`Still Open Cases`, `Backlog`) solo se fetchean cuando el scope es CAC (Agent/Leader con `serviceDesk === 'CAC'`, o Manager/Executive con `selectedDept === 'CAC'`). Para otros scopes, el dropdown muestra el indicador pero la línea queda vacía.
+- `dbOpenedAll` state: copia sin filtrar de `/api/opened-cases` que solo se carga cuando `scopeIsCAC`. Comparte la misma llamada HTTP con `dbCases` (filtrado a `compassIds`) — un solo round-trip alimenta ambos. Necesario para el denominador de Backlog.
+- Snapshot vs SUM (regla para nuevos indicadores grupales tipo "backlog"): Still Open Cases usa el último día con data en el bucket, no la suma. Aplicar el mismo patrón para cualquier indicador que represente un stock acumulado en lugar de un flujo.
 
 ### Ventana temporal
 

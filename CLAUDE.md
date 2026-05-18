@@ -48,12 +48,13 @@ React 19 + Vite frontend, Express 4 backend. Two parallel server entry points sh
 | Endpoint | Purpose |
 |---|---|
 | `GET  /api/health` | DB connectivity check |
-| `GET  /api/roster` | All Roster users from Google Sheets (5-min cache). Exposes `compass`, `callPicker`, `qa` join keys |
+| `GET  /api/roster` | All Roster users from Google Sheets (5-min cache). Exposes `compass`, `callPicker`, `qa`, `genesys` join keys |
 | `POST /api/login` | RFC lookup against Roster |
 | `GET  /api/opened-cases` | Abiertos rows (filtered by `case_owner` ↔ `Roster.compass`) |
-| `GET  /api/incoming-calls` | Actividad rows aggregated by `User` ↔ `Roster.callPicker` |
-| `GET  /api/qa` | QA + QA_Premium merged, weighted per-row score (`Agente`/`Agent` ↔ `Roster.qa`) |
-| `GET  /api/nsat` | NSAT rows with Q1/Q2/Q3 scores (`case_owner` ↔ `Roster.compass`) |
+| `GET  /api/incoming-calls` | Merges Actividad (`User` ↔ `Roster.callPicker`) + Rendimiento_Agente (`nombre_del_agente` ↔ `Roster.genesys`); values are summed downstream |
+| `GET  /api/qa` | Merges QA + QA_Premium (`Agente`/`Agent` ↔ `Roster.qa`); weighted per-row score |
+| `GET  /api/nsat` | Merges NSAT (`case_owner`) + NSAT_Premium (`agent_full_name`) both ↔ `Roster.compass`; ships Q1/Q2/Q3 scores |
+| `GET  /api/still-open-cases` | Aun_Abiertos rows (team-wide CAC backlog snapshot; no user filter) |
 
 The Roster is fetched from Google Sheets via the public CSV export URL (`gviz/tq?tqx=out:csv`) — **no service account or credentials**. If that ever changes (sheet made private), `fetchRosterFromSheets()` lives in both `server.ts` and `api/index.ts` and must be updated in both.
 
@@ -114,11 +115,14 @@ The Stellantis trend chart in `AgentView.tsx` is moving from synthetic `generate
 The wiring inside the component:
 
 - `DB_INDICATORS` Set — indicator names that should pull from BD instead of mock. Add to this set to "promote" a new indicator.
-- `dbTrendByBucket` useMemo — returns `{ out, qaByBucket, nsatByBucket }`:
-  - `out` holds **count-style** values (Opened Cases, Closed Cases, Incoming Calls, …) where `0` is a legitimate datapoint.
-  - `qaByBucket` / `nsatByBucket` hold **average-style** values where empty buckets are *absent* from the map — the trendData consumer renders `null` for those, so Recharts shows a gap. Lines for these indicators set `connectNulls={true}` so the gap is bridged.
-- New BD-backed indicators with average semantics (NSAT-like) should follow the `xxxByBucket` pattern. Counts can stay in `out`.
+- `scopeIsCAC` boolean — true when the current scope is the CAC team (Agent/Leader with `serviceDesk === 'CAC'`, or Manager/Executive currently filtering `selectedDept === 'CAC'`). Gates the team-wide CAC indicators (Still Open Cases, Backlog).
+- `dbTrendByBucket` useMemo returns `{ out, qaByBucket, nsatByBucket, backlogByBucket }`:
+  - `out` holds **count/sum-style** values (Opened, Closed, Incoming Calls, Still Open Cases) where `0` is a legitimate datapoint.
+  - `qaByBucket`, `nsatByBucket`, `backlogByBucket` hold **average / index / ratio** values where empty buckets are *absent* from the map — the trendData consumer renders `null` for those, so Recharts shows a gap. These three indicators opt into `connectNulls={true}` so the line still bridges the gap.
+- Still Open Cases is a **snapshot** (uses the latest day in a bucket, not the sum); Backlog is a **ratio** computed against monthly opened-case totals from the unfiltered `dbOpenedAll` set (loaded only when `scopeIsCAC`).
+- New BD-backed indicators with average/ratio semantics should follow the `xxxByBucket` pattern. Counts and snapshots can stay in `out`.
 
 When adding a new indicator, also touch:
-- `indicatorOptions` dropdown (KPIs are aggregates of multiple indicators; Indicators come from a single source table).
-- Tooltip + LabelList formatters in the LineChart — add a `% suffix` / integer / no-suffix branch as needed (QA shows `92.8%`; NSAT shows `-33`; counts show raw integer).
+- `indicatorOptions` dropdown (KPIs are aggregates of multiple indicators; Indicators come from a single source table or a fixed formula).
+- Tooltip + LabelList formatters in the LineChart — add a `% suffix` / integer / no-suffix branch as needed (QA shows `92.8%`; NSAT shows `-33`; Backlog shows `42%`; counts show raw integer).
+- If team-wide (CAC-only), gate the fetch behind `scopeIsCAC` so non-CAC users see an empty line.
