@@ -509,19 +509,33 @@ app.get('/api/nsat', async (req, res) => {
     //   Q1 = agent_satisfaction_score
     //   Q2 = effort_score
     //   Q3 = overall_satisfaction_score
+    // NSAT and NSAT_Premium share schema + join key (case_owner ↔ Roster.Compass)
+    // and the same formula. Premium agents live in NSAT_Premium; the rest in NSAT.
     const cols = '"case_owner", "datetime_closed", "agent_satisfaction_score", "effort_score", "overall_satisfaction_score"';
-    let rows: any[];
-    if (userList.length > 0) {
-      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
-      const r = await pool.query(
-        `SELECT ${cols} FROM "NSAT" WHERE "case_owner" IN (${placeholders})`,
-        userList,
-      );
-      rows = r.rows;
-    } else {
-      const r = await pool.query(`SELECT ${cols} FROM "NSAT"`);
-      rows = r.rows;
-    }
+    const queryTable = async (table: string): Promise<any[]> => {
+      try {
+        let r;
+        if (userList.length > 0) {
+          const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
+          r = await pool.query(
+            `SELECT ${cols} FROM "${table}" WHERE "case_owner" IN (${placeholders})`,
+            userList,
+          );
+        } else {
+          r = await pool.query(`SELECT ${cols} FROM "${table}"`);
+        }
+        return r.rows;
+      } catch (err: any) {
+        console.warn(`[nsat] table "${table}" unavailable: ${err?.message}`);
+        return [];
+      }
+    };
+
+    const [base, premium] = await Promise.all([
+      queryTable('NSAT'),
+      queryTable('NSAT_Premium'),
+    ]);
+    const rows = [...base, ...premium];
 
     const toScore = (v: unknown): number | null => {
       if (v == null) return null;
