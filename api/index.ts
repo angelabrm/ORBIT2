@@ -619,6 +619,26 @@ app.get('/api/nsat', async (req, res) => {
   }
 });
 
+// TEMP diagnostic for Rendimiento_Agente duplicate-intervals investigation
+app.get('/api/_debug/rend22', async (_req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'no db' });
+    const r = await pool.query(
+      `SELECT "id","inicio_del_intervalo","fin_del_intervalo","intervalo_completo","contestadas","tipo_de_medios","nombre_del_agente"
+       FROM "Rendimiento_Agente"
+       WHERE "nombre_del_agente" = $1
+         AND "inicio_del_intervalo" >= '2026-03-23'::timestamp
+         AND "inicio_del_intervalo" <  '2026-03-24'::timestamp
+       ORDER BY "inicio_del_intervalo"`,
+      ['User 22'],
+    );
+    res.json({ rows: r.rows.length, sum: r.rows.reduce((a: number, x: any) => a + (Number(x.contestadas) || 0), 0), data: r.rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message });
+  }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
