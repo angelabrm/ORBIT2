@@ -563,20 +563,39 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         qaIds         = teamRfcs.map(rfc => users[rfc]?.qa        ).filter((c): c is string => !!c);
       }
 
-      // Opened/Closed cases via Abiertos. The fetch returns the entire team's
-      // cases; we split it into:
-      //  - dbCases: filtered to the current user/team's compass IDs (powers
-      //    Opened/Closed/Closed Cases Rate per agent)
-      //  - dbOpenedAll: full unfiltered set (powers Backlog's monthly avg)
+      // Opened/Closed cases via Abiertos. Two related needs:
+      //  - dbCases   = user-filtered, within the user's selected date range.
+      //                Powers per-agent Opened/Closed/Closed Cases Rate.
+      //  - dbOpenedAll = team-wide, EXTENDED 3 months before startDate so the
+      //                Backlog denominator (avg opened in the 3 expired
+      //                months PRIOR to each bucket) has full months to read.
+      //                Without the extension, a narrow user range (e.g.
+      //                "prev month → current month") would leave the prior
+      //                months empty and the ratio would explode.
       const scopeIsCAC =
         currentUser.serviceDesk === 'CAC' ||
         (isManagement && selectedDept === 'CAC');
-      const needCasesFetch = compassIds.length > 0 || scopeIsCAC;
-      const allCases = needCasesFetch ? await fetchOpenedCases(undefined, startDate, endDate) : null;
-      setDbCases(allCases && compassIds.length > 0
-        ? allCases.filter(c => compassIds.includes(c.case_owner))
-        : null);
-      setDbOpenedAll(allCases && scopeIsCAC ? allCases : null);
+      const dbOpenedAllStart = startDate.subtract(3, 'month').startOf('month');
+
+      if (scopeIsCAC) {
+        // Two parallel fetches: narrow (for the user) + extended (for Backlog).
+        const [userCases, allCases] = await Promise.all([
+          compassIds.length > 0 ? fetchOpenedCases(undefined, startDate, endDate) : Promise.resolve(null),
+          fetchOpenedCases(undefined, dbOpenedAllStart, endDate),
+        ]);
+        setDbCases(userCases && compassIds.length > 0
+          ? userCases.filter(c => compassIds.includes(c.case_owner))
+          : null);
+        setDbOpenedAll(allCases);
+      } else if (compassIds.length > 0) {
+        // Non-CAC scope: only the per-user fetch.
+        const cases = await fetchOpenedCases(undefined, startDate, endDate);
+        setDbCases(cases.filter(c => compassIds.includes(c.case_owner)));
+        setDbOpenedAll(null);
+      } else {
+        setDbCases(null);
+        setDbOpenedAll(null);
+      }
 
       // NSAT survey rows via NSAT table (same Compass join as Abiertos)
       if (compassIds.length > 0) {
