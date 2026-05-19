@@ -1173,16 +1173,142 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const avgPerformance = teamStats.length > 0 ? teamStats.reduce((acc, s) => acc + s.performance, 0) / teamStats.length : 0;
   const avgProductivity = teamStats.length > 0 ? teamStats.reduce((acc, s) => acc + s.productivity, 0) / teamStats.length : 0;
 
+  // Per-bucket value of the currently-selected indicator for ONE selected
+  // team member. Returns null when not applicable (no member selected, not in
+  // a management view, or not a BD-backed indicator). Used as the second
+  // line ('Member Individual') in the management line chart.
+  // Team-wide indicators (Still Open Cases, Backlog) return null here —
+  // aggregatedTrendData mirrors the team value in that case (per spec, the
+  // individual line equals the team line for those indicators).
+  const memberBuckets = React.useMemo(() => {
+    if (!selectedTeamMember || !isManagement) return null;
+    if (!DB_INDICATORS.has(currentIndicator)) return null;
+    if (currentIndicator === 'Still Open Cases' || currentIndicator === 'Backlog') return null;
+
+    const m = users[selectedTeamMember];
+    if (!m) return null;
+
+    const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
+                     hierarchy === 'week' ? 'YYYY-ww' :
+                     hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
+    const FMT = 'M/D/YYYY h:mm A';
+    const result: Record<string, number> = {};
+
+    if ((currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases') && dbCases) {
+      const field = currentIndicator === 'Opened Cases' ? 'datetime_opened' : 'datetime_closed';
+      dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
+        const d = c?.[field] ? dayjs(c[field], FMT) : null;
+        if (d && d.isValid() && d.isBetween(startDate, endDate, 'day', '[]')) {
+          const k = d.format(formatStr);
+          result[k] = (result[k] || 0) + 1;
+        }
+      });
+    } else if (currentIndicator === 'Closed Cases Rate' && dbCases) {
+      const op: Record<string, number> = {};
+      const cl: Record<string, number> = {};
+      dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
+        const o  = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+        const cd = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+        if (o  && o.isValid()  && o.isBetween(startDate, endDate, 'day', '[]'))  op[o.format(formatStr)]  = (op[o.format(formatStr)]  || 0) + 1;
+        if (cd && cd.isValid() && cd.isBetween(startDate, endDate, 'day', '[]')) cl[cd.format(formatStr)] = (cl[cd.format(formatStr)] || 0) + 1;
+      });
+      Array.from(new Set([...Object.keys(op), ...Object.keys(cl)])).forEach(k => {
+        result[k] = op[k] > 0 ? Number(((cl[k] || 0) / op[k] * 100).toFixed(1)) : 0;
+      });
+    } else if (currentIndicator === 'Incoming Calls' && dbActivity) {
+      dbActivity.filter(a => a.user === m.callPicker || a.user === m.genesys).forEach(a => {
+        const d = dayjs(a.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = d.format(formatStr);
+        result[k] = (result[k] || 0) + a.answeredCalls;
+      });
+    } else if (currentIndicator === 'QA' && dbQA) {
+      const acc: Record<string, { sum: number; count: number }> = {};
+      dbQA.filter(q => q.agente === m.qa).forEach(q => {
+        const d = dayjs(q.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = d.format(formatStr);
+        if (!acc[k]) acc[k] = { sum: 0, count: 0 };
+        acc[k].sum += q.score;
+        acc[k].count++;
+      });
+      Object.entries(acc).forEach(([k, { sum, count }]) => {
+        result[k] = Number((sum / count).toFixed(1));
+      });
+    } else if (currentIndicator === 'NSAT' && dbNSAT) {
+      type Q = { p: number; d: number; t: number };
+      const acc: Record<string, [Q, Q, Q]> = {};
+      dbNSAT.filter(n => n.caseOwner === m.compass).forEach(n => {
+        const d = dayjs(n.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = d.format(formatStr);
+        if (!acc[k]) acc[k] = [{ p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }];
+        [n.q1, n.q2, n.q3].forEach((v, i) => {
+          if (v == null || !Number.isFinite(v)) return;
+          acc[k][i].t++;
+          if (v >= 9) acc[k][i].p++;
+          else if (v <= 6) acc[k][i].d++;
+        });
+      });
+      Object.entries(acc).forEach(([k, qs]) => {
+        if (qs.every(q => q.t === 0)) return;
+        const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
+        result[k] = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
+      });
+    }
+
+    return result;
+  }, [selectedTeamMember, isManagement, currentIndicator, users, dbCases, dbActivity, dbNSAT, dbQA, hierarchy, startDate, endDate, DB_INDICATORS]);
+
   const aggregatedTrendData = React.useMemo(() => {
     if (!isManagement) return [];
+    const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
+                     hierarchy === 'week' ? 'YYYY-ww' :
+                     hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
+
+    // BD-backed path: team value comes from dbTrendByBucket (already team-
+    // aggregated since management roles fetch ALL team data), member value
+    // from memberBuckets. The two team-wide CAC indicators (Still Open Cases
+    // and Backlog) have no individual breakdown — when a member is selected
+    // we mirror the team value into the individual line so both lines render
+    // and the user sees explicitly that the metric is team-wide.
+    if (DB_INDICATORS.has(currentIndicator)) {
+      const teamValueOf = (key: string): number | null => {
+        if (currentIndicator === 'QA')      return dbTrendByBucket.qaByBucket[key]      ?? null;
+        if (currentIndicator === 'NSAT')    return dbTrendByBucket.nsatByBucket[key]    ?? null;
+        if (currentIndicator === 'Backlog') return dbTrendByBucket.backlogByBucket[key] ?? null;
+        const v = dbTrendByBucket.out[key]?.[currentIndicator as keyof typeof dbTrendByBucket.out[string]];
+        return v !== undefined ? v : null;
+      };
+
+      const allKeys = new Set<string>([
+        ...Object.keys(dbTrendByBucket.out),
+        ...Object.keys(dbTrendByBucket.qaByBucket),
+        ...Object.keys(dbTrendByBucket.nsatByBucket),
+        ...Object.keys(dbTrendByBucket.backlogByBucket),
+      ]);
+
+      return Array.from(allKeys).sort().map(key => {
+        const teamVal = teamValueOf(key);
+        const entry: any = { name: key, fullDate: key, 'Team Average': teamVal };
+        if (selectedTeamMember) {
+          if (currentIndicator === 'Still Open Cases' || currentIndicator === 'Backlog') {
+            entry['Member Individual'] = teamVal;
+          } else if (memberBuckets) {
+            entry['Member Individual'] = memberBuckets[key] ?? null;
+          }
+        }
+        return entry;
+      });
+    }
+
+    // Mock-backed path (unchanged): average per team-member per bucket.
     const dateMap: Record<string, any[]> = {};
     teamRfcs.forEach(rfc => {
       const memberData = generateHistoricalData(rfc);
       memberData.forEach(d => {
         if (dayjs(d.date).isBetween(startDate, endDate, 'day', '[]')) {
-          const key = dayjs(d.date).format(hierarchy === 'day' ? 'YYYY-MM-DD' : 
-                                          hierarchy === 'week' ? 'YYYY-ww' : 
-                                          hierarchy === 'month' ? 'YYYY-MM' : 'YYYY');
+          const key = dayjs(d.date).format(formatStr);
           if (!dateMap[key]) dateMap[key] = [];
           dateMap[key].push(d);
         }
@@ -1198,9 +1324,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       if (selectedTeamMember) {
         const mData = generateHistoricalData(selectedTeamMember);
         const mItem = mData.find(d => {
-           const mKey = dayjs(d.date).format(hierarchy === 'day' ? 'YYYY-MM-DD' : 
-                                          hierarchy === 'week' ? 'YYYY-ww' : 
-                                          hierarchy === 'month' ? 'YYYY-MM' : 'YYYY');
+           const mKey = dayjs(d.date).format(formatStr);
            return mKey === key;
         });
         if (mItem) {
@@ -1209,7 +1333,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       }
       return entry;
     }).sort((a,b) => a.name.localeCompare(b.name));
-  }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember]);
+  }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember, DB_INDICATORS, dbTrendByBucket, memberBuckets]);
 
   const dataKeyManagement = indicatorMap[currentIndicator];
   const sortedTeam = React.useMemo(() => {
@@ -1441,29 +1565,36 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                   {selectedTeamMember && (
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, color: '#B018D9' }} domain={['auto', 'auto']} />
                   )}
-                  <Tooltip 
+                  <Tooltip
                     contentStyle={{ backgroundColor: isDark ? '#000A1A' : '#fff', borderRadius: 8, border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
-                    formatter={(val: number) => val.toFixed(1)}
+                    formatter={(val: any) => {
+                      if (val == null) return '—';
+                      if (currentIndicator === 'QA' || currentIndicator === 'Backlog') return `${formatValue(val)}%`;
+                      if (currentIndicator === 'NSAT')                                  return String(formatValue(val, true));
+                      return val.toFixed(1);
+                    }}
                   />
                   <Legend />
-                  <Line 
+                  <Line
                     yAxisId="left"
-                    type="monotone" 
-                    dataKey="Team Average" 
-                    stroke={theme.palette.primary.main} 
-                    strokeWidth={4} 
-                    dot={{ r: 4 }} 
+                    type="monotone"
+                    dataKey="Team Average"
+                    stroke={theme.palette.primary.main}
+                    strokeWidth={4}
+                    dot={{ r: 4 }}
                     activeDot={{ r: 8 }}
+                    connectNulls={currentIndicator === 'QA' || currentIndicator === 'NSAT' || currentIndicator === 'Backlog'}
                   />
                   {selectedTeamMember && (
-                    <Line 
+                    <Line
                       yAxisId="right"
-                      type="monotone" 
-                      dataKey="Member Individual" 
-                      stroke="#B018D9" 
-                      strokeWidth={3} 
+                      type="monotone"
+                      dataKey="Member Individual"
+                      stroke="#B018D9"
+                      strokeWidth={3}
                       strokeDasharray="5 5"
                       dot={{ r: 4 }}
+                      connectNulls={currentIndicator === 'QA' || currentIndicator === 'NSAT' || currentIndicator === 'Backlog'}
                     />
                   )}
                 </LineChart>
