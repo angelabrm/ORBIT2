@@ -116,13 +116,20 @@ The wiring inside the component:
 
 - `DB_INDICATORS` Set — indicator names that should pull from BD instead of mock. Add to this set to "promote" a new indicator.
 - `scopeIsCAC` boolean — true when the current scope is the CAC team (Agent/Leader with `serviceDesk === 'CAC'`, or Manager/Executive currently filtering `selectedDept === 'CAC'`). Gates the team-wide CAC indicators (Still Open Cases, Backlog).
-- `dbTrendByBucket` useMemo returns `{ out, qaByBucket, nsatByBucket, backlogByBucket }`:
+- `dbTrendByBucket` useMemo returns `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket }`:
   - `out` holds **count/sum-style** values (Opened, Closed, Incoming Calls, Still Open Cases) where `0` is a legitimate datapoint.
-  - `qaByBucket`, `nsatByBucket`, `backlogByBucket` hold **average / index / ratio** values where empty buckets are *absent* from the map — the trendData consumer renders `null` for those, so Recharts shows a gap. These three indicators opt into `connectNulls={true}` so the line still bridges the gap.
-- Still Open Cases is a **snapshot** (uses the latest day in a bucket, not the sum); Backlog is a **ratio** computed against monthly opened-case totals from the unfiltered `dbOpenedAll` set (loaded only when `scopeIsCAC`).
-- New BD-backed indicators with average/ratio semantics should follow the `xxxByBucket` pattern. Counts and snapshots can stay in `out`.
+  - The `xxxByBucket` maps hold **average / index / ratio** values where empty buckets are *absent* from the map — the trendData consumer renders `null` for those so Recharts shows a gap. These indicators opt into `connectNulls={true}` so the line still bridges the gap.
+- Still Open Cases is a **snapshot** (uses the latest day in a bucket, not the sum); Backlog is a **ratio** computed against monthly opened-case totals from the unfiltered `dbOpenedAll` set (loaded only when `scopeIsCAC`, with the fetch range extended 3 months before `startDate` so the prior months Backlog needs are always present regardless of the user-selected window).
+- `NSAT Information` / `NSAT Claims` reuse the NSAT formula over a subset of rows filtered by `contactReason1` — call `buildNsatIndex(rows)` with the filtered array. Same pattern for any future indicator that's a slice of an existing one.
+- New BD-backed indicators with average/ratio/index semantics should follow the `xxxByBucket` pattern. Counts and snapshots can stay in `out`.
 
-When adding a new indicator, also touch:
+**Management views (Leader / Manager / Executive)** use the same `dbTrendByBucket` (it's already team-aggregated for management roles since `loadDbData` fetches every team member's data) plus two helpers:
+- `memberBuckets` — recomputes the current indicator for the selected ranking member by filtering the team-wide arrays to that member's join keys. Powers the dashed "Member Individual" line. Returns `null` for team-wide indicators; the chart then mirrors the team value into the individual line.
+- `memberValuesForRanking` — single number per team member, used to sort the Team Members Ranking by the selected indicator (instead of the mock-based default).
+- The Team and Member lines render on a **single shared Y axis** so the visual ratio between team aggregate and individual contribution is directly readable. Don't reintroduce a right axis.
+
+When adding a new indicator, touch:
 - `indicatorOptions` dropdown (KPIs are aggregates of multiple indicators; Indicators come from a single source table or a fixed formula).
-- Tooltip + LabelList formatters in the LineChart — add a `% suffix` / integer / no-suffix branch as needed (QA shows `92.8%`; NSAT shows `-33`; Backlog shows `42%`; counts show raw integer).
-- If team-wide (CAC-only), gate the fetch behind `scopeIsCAC` so non-CAC users see an empty line.
+- Tooltip + LabelList formatters in the LineChart — add a `% suffix` / integer / no-suffix branch as needed (QA shows `92.8%`; NSAT/Information/Claims show `-33`; Backlog shows `42%`; counts show raw integer).
+- `memberBuckets`, `memberValuesForRanking`, and `teamValueOf` in `aggregatedTrendData` — same indicator branch in all three.
+- If team-wide (CAC-only), gate the fetch behind `scopeIsCAC` and skip the per-member helpers so the indicator mirrors the team value when a member is selected.
