@@ -28,10 +28,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [users, setUsers] = useState<Record<string, User>>({});
   const [selectedMember, setSelectedMemberRaw] = useState<User | null>(null);
   const [managementTab, setManagementTab] = useState<ManagementTab>("Operational");
-  // Default range: last 12 months rolling. Captures the most recent year of
-  // opened-cases data even when the DB hasn't been updated to the current month.
-  const [startDate, setStartDate] = useState<Dayjs>(dayjs().subtract(12, 'month').startOf('month'));
-  const [endDate, setEndDate] = useState<Dayjs>(dayjs());
+  // Default range: start of previous month → end of current month. Keeps the
+  // window short and aligned to calendar months, so monthly buckets in the
+  // line chart show two complete data points (last month + current month).
+  const [startDate, setStartDate] = useState<Dayjs>(dayjs().subtract(1, 'month').startOf('month'));
+  const [endDate, setEndDate] = useState<Dayjs>(dayjs().endOf('month'));
   const previousTabRef = useRef<ManagementTab | null>(null);
 
   useEffect(() => {
