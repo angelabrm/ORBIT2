@@ -1336,17 +1336,97 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember, DB_INDICATORS, dbTrendByBucket, memberBuckets]);
 
   const dataKeyManagement = indicatorMap[currentIndicator];
-  const sortedTeam = React.useMemo(() => {
-    return [...teamStats].sort((a, b) => {
-      const valA = (a as any)[dataKeyManagement] || 0;
-      const valB = (b as any)[dataKeyManagement] || 0;
-      return valB - valA;
+
+  // BD-backed per-member value for the selected indicator. Returns null when:
+  //   - not in a management view
+  //   - the indicator isn't BD-backed (falls back to mock via dataKeyManagement)
+  //   - the indicator is team-wide (Backlog / Still Open Cases — same value
+  //     for every member, no meaningful ranking; also falls back to mock so
+  //     the team isn't randomly tied)
+  const memberValuesForRanking = React.useMemo(() => {
+    if (!isManagement) return null;
+    if (!DB_INDICATORS.has(currentIndicator)) return null;
+    if (currentIndicator === 'Still Open Cases' || currentIndicator === 'Backlog') return null;
+
+    const FMT = 'M/D/YYYY h:mm A';
+    const result: Record<string, number> = {};
+
+    teamRfcs.forEach(rfc => {
+      const m = users[rfc];
+      if (!m) return;
+      let val = 0;
+
+      if ((currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases') && dbCases && m.compass) {
+        const field = currentIndicator === 'Opened Cases' ? 'datetime_opened' : 'datetime_closed';
+        val = dbCases.filter(c => {
+          if (c.case_owner !== m.compass) return false;
+          const d = c?.[field] ? dayjs(c[field], FMT) : null;
+          return d && d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }).length;
+      } else if (currentIndicator === 'Closed Cases Rate' && dbCases && m.compass) {
+        let op = 0, cl = 0;
+        dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
+          const o  = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+          const cd = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+          if (o  && o.isValid()  && o.isBetween(startDate, endDate, 'day', '[]'))  op++;
+          if (cd && cd.isValid() && cd.isBetween(startDate, endDate, 'day', '[]')) cl++;
+        });
+        val = op > 0 ? Number(((cl / op) * 100).toFixed(1)) : 0;
+      } else if (currentIndicator === 'Incoming Calls' && dbActivity) {
+        val = dbActivity.filter(a => {
+          if (a.user !== m.callPicker && a.user !== m.genesys) return false;
+          const d = dayjs(a.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }).reduce((acc, a) => acc + a.answeredCalls, 0);
+      } else if (currentIndicator === 'QA' && dbQA && m.qa) {
+        const mine = dbQA.filter(q => {
+          if (q.agente !== m.qa) return false;
+          const d = dayjs(q.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        });
+        if (mine.length > 0) {
+          val = Number((mine.reduce((acc, q) => acc + q.score, 0) / mine.length).toFixed(1));
+        }
+      } else if (currentIndicator === 'NSAT' && dbNSAT && m.compass) {
+        type Q = { p: number; d: number; t: number };
+        const qs: [Q, Q, Q] = [{ p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }];
+        dbNSAT.filter(n => n.caseOwner === m.compass).forEach(n => {
+          const d = dayjs(n.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          [n.q1, n.q2, n.q3].forEach((v, i) => {
+            if (v == null || !Number.isFinite(v)) return;
+            qs[i].t++;
+            if (v >= 9) qs[i].p++;
+            else if (v <= 6) qs[i].d++;
+          });
+        });
+        if (qs.some(q => q.t > 0)) {
+          const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
+          val = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
+        }
+      }
+
+      result[rfc] = val;
     });
-  }, [teamStats, dataKeyManagement]);
+    return result;
+  }, [isManagement, currentIndicator, teamRfcs, users, dbCases, dbActivity, dbNSAT, dbQA, startDate, endDate, DB_INDICATORS]);
+
+  const sortedTeam = React.useMemo(() => {
+    // Each entry gets a uniform `_rankValue` so the rest of the pipeline
+    // (quartileData, ranking list display) doesn't need to know whether the
+    // source was BD or mock.
+    const withValue = teamStats.map(s => ({
+      ...s,
+      _rankValue: memberValuesForRanking
+        ? (memberValuesForRanking[s.rfc] ?? 0)
+        : ((s as any)[dataKeyManagement] || 0),
+    }));
+    return withValue.sort((a, b) => b._rankValue - a._rankValue);
+  }, [teamStats, dataKeyManagement, memberValuesForRanking]);
 
   const quartileData = React.useMemo(() => {
     return sortedTeam.map((member, index) => {
-      const percentile = (index / sortedTeam.length) * 100;
+      const percentile = sortedTeam.length > 0 ? (index / sortedTeam.length) * 100 : 0;
       let quartile = 'Q1';
       if (percentile >= 75) quartile = 'Q4';
       else if (percentile >= 50) quartile = 'Q3';
@@ -1355,10 +1435,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       return {
         ...member,
         quartile,
-        value: (member as any)[dataKeyManagement]
+        value: member._rankValue,
       };
     });
-  }, [sortedTeam, dataKeyManagement]);
+  }, [sortedTeam]);
 
   // Team Admin Stats Calculation
   const teamAdminStats = React.useMemo(() => {
@@ -1640,7 +1720,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                             <Typography sx={{ fontSize: 13, fontWeight: selectedTeamMember === member.rfc ? 700 : 500 }}>{member.fullName}</Typography>
                           </Box>
                           <Typography sx={{ fontSize: 12, fontWeight: 900, fontFamily: '"JetBrains Mono", monospace', opacity: 0.8 }}>
-                            {formatValue(member.value, ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(currentIndicator))}{currentIndicator.includes('%') || ['Performance', 'Productivity', 'Bonus', 'Closed Cases Rate'].includes(currentIndicator) ? '%' : ''}
+                            {formatValue(member.value, ['Opened Cases', 'Closed Cases', 'Still Open Cases', 'Backlog', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(currentIndicator))}{currentIndicator.includes('%') || ['Performance', 'Productivity', 'Bonus', 'Closed Cases Rate', 'QA', 'Backlog'].includes(currentIndicator) ? '%' : ''}
                           </Typography>
                         </Box>
                       ))}
