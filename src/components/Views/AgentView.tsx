@@ -1561,10 +1561,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                 <LineChart data={aggregatedTrendData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'} />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
-                  {selectedTeamMember && (
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, color: '#B018D9' }} domain={['auto', 'auto']} />
-                  )}
+                  {/* Single shared axis so Team and Member are directly comparable
+                      on the same scale (per spec) — dual axes would distort the
+                      ratio between individual contribution and team aggregate. */}
+                  <YAxis tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
                   <Tooltip
                     contentStyle={{ backgroundColor: isDark ? '#000A1A' : '#fff', borderRadius: 8, border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
                     formatter={(val: any) => {
@@ -1576,7 +1576,6 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                   />
                   <Legend />
                   <Line
-                    yAxisId="left"
                     type="monotone"
                     dataKey="Team Average"
                     stroke={theme.palette.primary.main}
@@ -1587,7 +1586,6 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                   />
                   {selectedTeamMember && (
                     <Line
-                      yAxisId="right"
                       type="monotone"
                       dataKey="Member Individual"
                       stroke="#B018D9"
