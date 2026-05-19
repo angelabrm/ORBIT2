@@ -557,7 +557,7 @@ app.get('/api/nsat', async (req, res) => {
     //   NSAT.case_owner          ↔ Roster.Compass
     //   NSAT_Premium.agent_full_name ↔ Roster.Compass
     // We alias the join column to "_owner" so downstream processing is uniform.
-    const dataCols = '"datetime_closed", "agent_satisfaction_score", "effort_score", "overall_satisfaction_score"';
+    const dataCols = '"datetime_closed", "agent_satisfaction_score", "effort_score", "overall_satisfaction_score", "contact_reason_1"';
     const queryTable = async (table: string, joinCol: string): Promise<any[]> => {
       try {
         let r;
@@ -603,6 +603,9 @@ app.get('/api/nsat', async (req, res) => {
           q1: toScore(r['agent_satisfaction_score']),
           q2: toScore(r['effort_score']),
           q3: toScore(r['overall_satisfaction_score']),
+          // Used by the frontend to split NSAT into NSAT Information and
+          // NSAT Claims via the same per-question NSAT formula.
+          contactReason1: r['contact_reason_1'] ?? null,
         };
       })
       .filter((r: any): r is NonNullable<typeof r> => r !== null)

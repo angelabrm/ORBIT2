@@ -81,9 +81,10 @@ export interface NSATRow {
   caseOwner: string;
   dateStr: string;
   dateMs: number;
-  q1: number | null;   // agent_satisfaction_score
-  q2: number | null;   // effort_score
-  q3: number | null;   // overall_satisfaction_score
+  q1: number | null;             // agent_satisfaction_score
+  q2: number | null;             // effort_score
+  q3: number | null;             // overall_satisfaction_score
+  contactReason1: string | null; // splits NSAT into NSAT Information / NSAT Claims downstream
 }
 
 export const fetchNSAT = async (compassIds?: string[], startDate?: any, endDate?: any): Promise<NSATRow[]> => {

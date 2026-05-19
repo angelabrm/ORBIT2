@@ -747,7 +747,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'Still Open Cases', 'Backlog']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Still Open Cases', 'Backlog']),
     []
   );
 
@@ -827,44 +827,42 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
     // NSAT Index per bucket. NPS-style: per question Q, score = % promoters
     // (responses 9 or 10) minus % detractors (1-6), with 7/8 passive. Then
-    // average across the three questions.
-    //   - Each question's denominator counts only rows where THAT question
-    //     has a numeric answer (null/missing values are skipped).
-    //   - If all three questions have zero responses in a bucket, the bucket
-    //     stays out of nsatByBucket → line chart shows a gap (same as QA).
-    const nsatByBucket: Record<string, number> = {};
-    if (dbNSAT && dbNSAT.length > 0) {
+    // average across the three questions. Each question's denominator counts
+    // only rows where THAT question has a numeric answer. If all three
+    // questions have zero responses in a bucket, the bucket stays out →
+    // line chart shows a gap (same as QA). The integer is in [-100, +100].
+    //
+    // We compute the same formula three times over different row subsets:
+    //   - `nsatByBucket`        — all NSAT rows
+    //   - `nsatInfoByBucket`    — only contact_reason_1 = "Information & Assistance requests"
+    //   - `nsatClaimsByBucket`  — only contact_reason_1 = "Complaint"
+    const buildNsatIndex = (rows: NSATRow[] | null): Record<string, number> => {
+      const out: Record<string, number> = {};
+      if (!rows || rows.length === 0) return out;
       type Q = { p: number; d: number; t: number };
       const acc: Record<string, [Q, Q, Q]> = {};
-      const ensureAcc = (k: string) => {
-        if (!acc[k]) acc[k] = [
-          { p: 0, d: 0, t: 0 },
-          { p: 0, d: 0, t: 0 },
-          { p: 0, d: 0, t: 0 },
-        ];
-        return acc[k];
-      };
-      dbNSAT.forEach(n => {
+      rows.forEach(n => {
         const d = dayjs(n.dateStr);
         if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
         const k = d.format(formatStr);
-        const bucket = ensureAcc(k);
+        if (!acc[k]) acc[k] = [{ p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }];
         [n.q1, n.q2, n.q3].forEach((v, i) => {
           if (v == null || !Number.isFinite(v)) return;
-          bucket[i].t++;
-          if (v >= 9) bucket[i].p++;
-          else if (v <= 6) bucket[i].d++;
+          acc[k][i].t++;
+          if (v >= 9) acc[k][i].p++;
+          else if (v <= 6) acc[k][i].d++;
         });
       });
-
       Object.entries(acc).forEach(([k, qs]) => {
-        // Drop the bucket entirely if no question had a response (chart shows gap).
         if (qs.every(q => q.t === 0)) return;
         const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
-        // NSAT is a -100…+100 integer score, not a percentage. Round, don't decimal.
-        nsatByBucket[k] = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
+        out[k] = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
       });
-    }
+      return out;
+    };
+    const nsatByBucket       = buildNsatIndex(dbNSAT);
+    const nsatInfoByBucket   = buildNsatIndex(dbNSAT?.filter(n => n.contactReason1 === 'Information & Assistance requests') ?? null);
+    const nsatClaimsByBucket = buildNsatIndex(dbNSAT?.filter(n => n.contactReason1 === 'Complaint') ?? null);
 
     // Still Open Cases is a SNAPSHOT metric (current backlog), not a flow.
     // Summing across days would be meaningless — a case still open on Mon and
@@ -935,7 +933,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    return { out, qaByBucket, nsatByBucket, backlogByBucket };
+    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket };
   }, [dbCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
@@ -963,6 +961,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     Object.keys(dbTrendByBucket.out).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.qaByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.nsatByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.nsatInfoByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.nsatClaimsByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.backlogByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
@@ -983,6 +983,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         }
         if (indicator === 'NSAT') {
           const v = dbTrendByBucket.nsatByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        if (indicator === 'NSAT Information') {
+          const v = dbTrendByBucket.nsatInfoByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        if (indicator === 'NSAT Claims') {
+          const v = dbTrendByBucket.nsatClaimsByBucket[key];
           entry[indicator] = v !== undefined ? v : null;
           return;
         }
@@ -1235,21 +1245,27 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       Object.entries(acc).forEach(([k, { sum, count }]) => {
         result[k] = Number((sum / count).toFixed(1));
       });
-    } else if (currentIndicator === 'NSAT' && dbNSAT) {
+    } else if ((currentIndicator === 'NSAT' || currentIndicator === 'NSAT Information' || currentIndicator === 'NSAT Claims') && dbNSAT) {
+      const reasonFilter =
+        currentIndicator === 'NSAT Information' ? 'Information & Assistance requests' :
+        currentIndicator === 'NSAT Claims'      ? 'Complaint' :
+        null;
       type Q = { p: number; d: number; t: number };
       const acc: Record<string, [Q, Q, Q]> = {};
-      dbNSAT.filter(n => n.caseOwner === m.compass).forEach(n => {
-        const d = dayjs(n.dateStr);
-        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
-        const k = d.format(formatStr);
-        if (!acc[k]) acc[k] = [{ p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }];
-        [n.q1, n.q2, n.q3].forEach((v, i) => {
-          if (v == null || !Number.isFinite(v)) return;
-          acc[k][i].t++;
-          if (v >= 9) acc[k][i].p++;
-          else if (v <= 6) acc[k][i].d++;
+      dbNSAT
+        .filter(n => n.caseOwner === m.compass && (reasonFilter === null || n.contactReason1 === reasonFilter))
+        .forEach(n => {
+          const d = dayjs(n.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          const k = d.format(formatStr);
+          if (!acc[k]) acc[k] = [{ p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }];
+          [n.q1, n.q2, n.q3].forEach((v, i) => {
+            if (v == null || !Number.isFinite(v)) return;
+            acc[k][i].t++;
+            if (v >= 9) acc[k][i].p++;
+            else if (v <= 6) acc[k][i].d++;
+          });
         });
-      });
       Object.entries(acc).forEach(([k, qs]) => {
         if (qs.every(q => q.t === 0)) return;
         const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
@@ -1274,9 +1290,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // and the user sees explicitly that the metric is team-wide.
     if (DB_INDICATORS.has(currentIndicator)) {
       const teamValueOf = (key: string): number | null => {
-        if (currentIndicator === 'QA')      return dbTrendByBucket.qaByBucket[key]      ?? null;
-        if (currentIndicator === 'NSAT')    return dbTrendByBucket.nsatByBucket[key]    ?? null;
-        if (currentIndicator === 'Backlog') return dbTrendByBucket.backlogByBucket[key] ?? null;
+        if (currentIndicator === 'QA')               return dbTrendByBucket.qaByBucket[key]         ?? null;
+        if (currentIndicator === 'NSAT')             return dbTrendByBucket.nsatByBucket[key]       ?? null;
+        if (currentIndicator === 'NSAT Information') return dbTrendByBucket.nsatInfoByBucket[key]   ?? null;
+        if (currentIndicator === 'NSAT Claims')      return dbTrendByBucket.nsatClaimsByBucket[key] ?? null;
+        if (currentIndicator === 'Backlog')          return dbTrendByBucket.backlogByBucket[key]    ?? null;
         const v = dbTrendByBucket.out[key]?.[currentIndicator as keyof typeof dbTrendByBucket.out[string]];
         return v !== undefined ? v : null;
       };
@@ -1285,6 +1303,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         ...Object.keys(dbTrendByBucket.out),
         ...Object.keys(dbTrendByBucket.qaByBucket),
         ...Object.keys(dbTrendByBucket.nsatByBucket),
+        ...Object.keys(dbTrendByBucket.nsatInfoByBucket),
+        ...Object.keys(dbTrendByBucket.nsatClaimsByBucket),
         ...Object.keys(dbTrendByBucket.backlogByBucket),
       ]);
 
@@ -1387,19 +1407,25 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         if (mine.length > 0) {
           val = Number((mine.reduce((acc, q) => acc + q.score, 0) / mine.length).toFixed(1));
         }
-      } else if (currentIndicator === 'NSAT' && dbNSAT && m.compass) {
+      } else if ((currentIndicator === 'NSAT' || currentIndicator === 'NSAT Information' || currentIndicator === 'NSAT Claims') && dbNSAT && m.compass) {
+        const reasonFilter =
+          currentIndicator === 'NSAT Information' ? 'Information & Assistance requests' :
+          currentIndicator === 'NSAT Claims'      ? 'Complaint' :
+          null;
         type Q = { p: number; d: number; t: number };
         const qs: [Q, Q, Q] = [{ p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }, { p: 0, d: 0, t: 0 }];
-        dbNSAT.filter(n => n.caseOwner === m.compass).forEach(n => {
-          const d = dayjs(n.dateStr);
-          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
-          [n.q1, n.q2, n.q3].forEach((v, i) => {
-            if (v == null || !Number.isFinite(v)) return;
-            qs[i].t++;
-            if (v >= 9) qs[i].p++;
-            else if (v <= 6) qs[i].d++;
+        dbNSAT
+          .filter(n => n.caseOwner === m.compass && (reasonFilter === null || n.contactReason1 === reasonFilter))
+          .forEach(n => {
+            const d = dayjs(n.dateStr);
+            if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+            [n.q1, n.q2, n.q3].forEach((v, i) => {
+              if (v == null || !Number.isFinite(v)) return;
+              qs[i].t++;
+              if (v >= 9) qs[i].p++;
+              else if (v <= 6) qs[i].d++;
+            });
           });
-        });
         if (qs.some(q => q.t > 0)) {
           const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
           val = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
@@ -1650,7 +1676,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     formatter={(val: any) => {
                       if (val == null) return '—';
                       if (currentIndicator === 'QA' || currentIndicator === 'Backlog') return `${formatValue(val)}%`;
-                      if (currentIndicator === 'NSAT')                                  return String(formatValue(val, true));
+                      if (currentIndicator === 'NSAT' || currentIndicator === 'NSAT Information' || currentIndicator === 'NSAT Claims') {
+                        return String(formatValue(val, true));
+                      }
                       return val.toFixed(1);
                     }}
                   />
@@ -1662,7 +1690,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     strokeWidth={4}
                     dot={{ r: 4 }}
                     activeDot={{ r: 8 }}
-                    connectNulls={currentIndicator === 'QA' || currentIndicator === 'NSAT' || currentIndicator === 'Backlog'}
+                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog'].includes(currentIndicator)}
                   />
                   {selectedTeamMember && (
                     <Line
@@ -1672,7 +1700,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       strokeWidth={3}
                       strokeDasharray="5 5"
                       dot={{ r: 4 }}
-                      connectNulls={currentIndicator === 'QA' || currentIndicator === 'NSAT' || currentIndicator === 'Backlog'}
+                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog'].includes(currentIndicator)}
                     />
                   )}
                 </LineChart>
@@ -1923,11 +1951,13 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
                       formatter={(val: any, name: string) => {
                         if (val == null) return ['—', name];
-                        if (name === 'QA')      return [`${formatValue(val)}%`, name];
-                        if (name === 'NSAT')    return [String(formatValue(val, true)), name]; // -100…+100 integer, no %
-                        if (name === 'Backlog') return [`${formatValue(val, true)}%`, name];   // integer %
-                        const isInt = ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(name)
-                          || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(si));
+                        if (name === 'QA')                return [`${formatValue(val)}%`, name];
+                        if (name === 'NSAT')              return [String(formatValue(val, true)), name]; // -100…+100 integer, no %
+                        if (name === 'NSAT Information')  return [String(formatValue(val, true)), name];
+                        if (name === 'NSAT Claims')       return [String(formatValue(val, true)), name];
+                        if (name === 'Backlog')           return [`${formatValue(val, true)}%`, name];   // integer %
+                        const isInt = ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(name)
+                          || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(si));
                         return [formatValue(val, isInt), name];
                       }}
                       labelFormatter={(label, payload) => {
@@ -1952,7 +1982,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
-                          connectNulls={indicator === 'QA' || indicator === 'NSAT' || indicator === 'Backlog'}
+                          connectNulls={indicator === 'QA' || indicator === 'NSAT' || indicator === 'NSAT Information' || indicator === 'NSAT Claims' || indicator === 'Backlog'}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
@@ -1967,9 +1997,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                               }}
                               formatter={(val: any) => {
                                 if (val == null) return '';
-                                if (indicator === 'QA')      return `${formatValue(val)}%`;
-                                if (indicator === 'NSAT')    return String(formatValue(val, true));
-                                if (indicator === 'Backlog') return `${formatValue(val, true)}%`;
+                                if (indicator === 'QA')               return `${formatValue(val)}%`;
+                                if (indicator === 'NSAT')             return String(formatValue(val, true));
+                                if (indicator === 'NSAT Information') return String(formatValue(val, true));
+                                if (indicator === 'NSAT Claims')      return String(formatValue(val, true));
+                                if (indicator === 'Backlog')          return `${formatValue(val, true)}%`;
                                 return formatValue(val);
                               }}
                             />
