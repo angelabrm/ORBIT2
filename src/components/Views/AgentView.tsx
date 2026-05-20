@@ -747,7 +747,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Still Open Cases', 'Backlog']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Still Open Cases', 'Backlog', '% First Contact Resolution']),
     []
   );
 
@@ -789,6 +789,29 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         b['Closed Cases Rate'] = b['Opened Cases'] > 0
           ? Number(((b['Closed Cases'] / b['Opened Cases']) * 100).toFixed(1))
           : 0;
+      });
+    }
+
+    // % First Contact Resolution: of the cases CLOSED in this bucket, what
+    // fraction had datetime_opened on the same calendar day as datetime_closed.
+    //   numerator   = count of (opened-day == closed-day)
+    //   denominator = total cases closed in bucket
+    // Buckets with no closed cases stay out of fcrByBucket → null on the
+    // chart (avoids a misleading 0% on quiet days).
+    const fcrByBucket: Record<string, number> = {};
+    if (dbCases) {
+      const acc: Record<string, { sameDay: number; total: number }> = {};
+      dbCases.forEach(c => {
+        const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+        if (!closed || !closed.isValid() || !closed.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = closed.format(formatStr);
+        if (!acc[k]) acc[k] = { sameDay: 0, total: 0 };
+        acc[k].total++;
+        const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+        if (opened && opened.isValid() && opened.isSame(closed, 'day')) acc[k].sameDay++;
+      });
+      Object.entries(acc).forEach(([k, { sameDay, total }]) => {
+        if (total > 0) fcrByBucket[k] = Number(((sameDay / total) * 100).toFixed(1));
       });
     }
 
@@ -933,7 +956,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket };
+    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket };
   }, [dbCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
@@ -964,6 +987,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     Object.keys(dbTrendByBucket.nsatInfoByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.nsatClaimsByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.backlogByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.fcrByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
       const entry: any = {
@@ -998,6 +1022,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         }
         if (indicator === 'Backlog') {
           const v = dbTrendByBucket.backlogByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        if (indicator === '% First Contact Resolution') {
+          const v = dbTrendByBucket.fcrByBucket[key];
           entry[indicator] = v !== undefined ? v : null;
           return;
         }
@@ -1225,6 +1254,20 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       Array.from(new Set([...Object.keys(op), ...Object.keys(cl)])).forEach(k => {
         result[k] = op[k] > 0 ? Number(((cl[k] || 0) / op[k] * 100).toFixed(1)) : 0;
       });
+    } else if (currentIndicator === '% First Contact Resolution' && dbCases) {
+      const acc: Record<string, { sameDay: number; total: number }> = {};
+      dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
+        const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+        if (!closed || !closed.isValid() || !closed.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = closed.format(formatStr);
+        if (!acc[k]) acc[k] = { sameDay: 0, total: 0 };
+        acc[k].total++;
+        const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+        if (opened && opened.isValid() && opened.isSame(closed, 'day')) acc[k].sameDay++;
+      });
+      Object.entries(acc).forEach(([k, { sameDay, total }]) => {
+        if (total > 0) result[k] = Number(((sameDay / total) * 100).toFixed(1));
+      });
     } else if (currentIndicator === 'Incoming Calls' && dbActivity) {
       dbActivity.filter(a => a.user === m.callPicker || a.user === m.genesys).forEach(a => {
         const d = dayjs(a.dateStr);
@@ -1295,6 +1338,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         if (currentIndicator === 'NSAT Information') return dbTrendByBucket.nsatInfoByBucket[key]   ?? null;
         if (currentIndicator === 'NSAT Claims')      return dbTrendByBucket.nsatClaimsByBucket[key] ?? null;
         if (currentIndicator === 'Backlog')          return dbTrendByBucket.backlogByBucket[key]    ?? null;
+        if (currentIndicator === '% First Contact Resolution') return dbTrendByBucket.fcrByBucket[key] ?? null;
         const v = dbTrendByBucket.out[key]?.[currentIndicator as keyof typeof dbTrendByBucket.out[string]];
         return v !== undefined ? v : null;
       };
@@ -1306,6 +1350,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         ...Object.keys(dbTrendByBucket.nsatInfoByBucket),
         ...Object.keys(dbTrendByBucket.nsatClaimsByBucket),
         ...Object.keys(dbTrendByBucket.backlogByBucket),
+        ...Object.keys(dbTrendByBucket.fcrByBucket),
       ]);
 
       return Array.from(allKeys).sort().map(key => {
@@ -1392,6 +1437,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           if (cd && cd.isValid() && cd.isBetween(startDate, endDate, 'day', '[]')) cl++;
         });
         val = op > 0 ? Number(((cl / op) * 100).toFixed(1)) : 0;
+      } else if (currentIndicator === '% First Contact Resolution' && dbCases && m.compass) {
+        let sameDay = 0, total = 0;
+        dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
+          const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
+          if (!closed || !closed.isValid() || !closed.isBetween(startDate, endDate, 'day', '[]')) return;
+          total++;
+          const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+          if (opened && opened.isValid() && opened.isSame(closed, 'day')) sameDay++;
+        });
+        val = total > 0 ? Number(((sameDay / total) * 100).toFixed(1)) : 0;
       } else if (currentIndicator === 'Incoming Calls' && dbActivity) {
         val = dbActivity.filter(a => {
           if (a.user !== m.callPicker && a.user !== m.genesys) return false;
@@ -1675,7 +1730,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     contentStyle={{ backgroundColor: isDark ? '#000A1A' : '#fff', borderRadius: 8, border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
                     formatter={(val: any) => {
                       if (val == null) return '—';
-                      if (currentIndicator === 'QA' || currentIndicator === 'Backlog') return `${formatValue(val)}%`;
+                      if (currentIndicator === 'QA' || currentIndicator === 'Backlog' || currentIndicator === '% First Contact Resolution') return `${formatValue(val)}%`;
                       if (currentIndicator === 'NSAT' || currentIndicator === 'NSAT Information' || currentIndicator === 'NSAT Claims') {
                         return String(formatValue(val, true));
                       }
@@ -1690,7 +1745,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     strokeWidth={4}
                     dot={{ r: 4 }}
                     activeDot={{ r: 8 }}
-                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog'].includes(currentIndicator)}
+                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution'].includes(currentIndicator)}
                   />
                   {selectedTeamMember && (
                     <Line
@@ -1700,7 +1755,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       strokeWidth={3}
                       strokeDasharray="5 5"
                       dot={{ r: 4 }}
-                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog'].includes(currentIndicator)}
+                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution'].includes(currentIndicator)}
                     />
                   )}
                 </LineChart>
@@ -1956,6 +2011,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                         if (name === 'NSAT Information')  return [String(formatValue(val, true)), name];
                         if (name === 'NSAT Claims')       return [String(formatValue(val, true)), name];
                         if (name === 'Backlog')           return [`${formatValue(val, true)}%`, name];   // integer %
+                        if (name === '% First Contact Resolution') return [`${formatValue(val)}%`, name]; // decimal %
                         const isInt = ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(name)
                           || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(si));
                         return [formatValue(val, isInt), name];
@@ -1982,7 +2038,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
-                          connectNulls={indicator === 'QA' || indicator === 'NSAT' || indicator === 'NSAT Information' || indicator === 'NSAT Claims' || indicator === 'Backlog'}
+                          connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution'].includes(indicator)}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
@@ -2002,6 +2058,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                                 if (indicator === 'NSAT Information') return String(formatValue(val, true));
                                 if (indicator === 'NSAT Claims')      return String(formatValue(val, true));
                                 if (indicator === 'Backlog')          return `${formatValue(val, true)}%`;
+                                if (indicator === '% First Contact Resolution') return `${formatValue(val)}%`;
                                 return formatValue(val);
                               }}
                             />
