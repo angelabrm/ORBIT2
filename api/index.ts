@@ -210,12 +210,21 @@ app.get('/api/opened-cases', async (req, res) => {
     if (startDate || endDate) {
       const start = startDate ? Date.parse(startDate) : null;
       const end   = endDate   ? Date.parse(endDate)   : null;
-      rows = rows.filter(row => {
-        const t = parseOpenedAt(row.datetime_opened);
+      // Include a row if EITHER datetime_opened OR datetime_closed falls in
+      // the range. This way Closed Cases / FCR bucketing (which bucket by
+      // datetime_closed) still sees cases that opened earlier and closed
+      // within the window — without that, the denominator was undercounted
+      // and FCR % was artificially high.
+      const inRange = (t: number | null) => {
         if (t === null) return false;
         if (start !== null && t < start - 86400000) return false; // day-inclusive
         if (end   !== null && t > end   + 86400000) return false;
         return true;
+      };
+      rows = rows.filter(row => {
+        const tOpened = parseOpenedAt(row.datetime_opened);
+        const tClosed = row.datetime_closed ? parseOpenedAt(row.datetime_closed) : null;
+        return inRange(tOpened) || inRange(tClosed);
       });
     }
 
