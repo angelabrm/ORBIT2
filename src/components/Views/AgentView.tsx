@@ -468,6 +468,122 @@ const AdherenceTooltip: React.FC<{ day: dayjs.Dayjs; rfc: string; isComplete: bo
   );
 };
 
+// ─── Custom tooltip for Opened Cases / Closed Cases breakdown ────────────────
+// Shows Information & Complaint sub-counts beneath the main value.
+// Works for both the single-indicator chart (agent/leader) and the management
+// chart (Team Average + Member Individual).
+const CasesTooltip: React.FC<{
+  active?: boolean;
+  payload?: any[];
+  label?: any;
+  // Which indicators are relevant (one or two for agent, or the currentIndicator for management)
+  indicators: string[];
+  // management=true means the lines are keyed "Team Average" / "Member Individual"
+  isManagement?: boolean;
+  currentIndicator?: string;
+  selectedTeamMember?: string | null;
+  isDark?: boolean;
+  primaryColor?: string;
+  hierarchy?: string;
+}> = ({ active, payload, indicators, isManagement, currentIndicator, selectedTeamMember, isDark, primaryColor, hierarchy }) => {
+  const theme = useTheme();
+  const primary = primaryColor || theme.palette.primary.main;
+  if (!active || !payload || payload.length === 0) return null;
+
+  const pt = payload[0].payload;
+  const dateLabel = (() => {
+    const d = dayjs(pt.fullDate || pt.name);
+    if (!d.isValid()) return pt.name;
+    if (hierarchy === 'day')   return d.format('DD MMMM YYYY');
+    if (hierarchy === 'week')  return d.format('[Week] ww, YYYY');
+    if (hierarchy === 'month') return d.format('MMMM YYYY');
+    return d.format('YYYY');
+  })();
+
+  const containerStyle: React.CSSProperties = {
+    backgroundColor: isDark ? 'rgba(0, 8, 20, 0.95)' : '#fff',
+    border: `2px solid ${primary}`,
+    borderRadius: 8,
+    padding: '10px 14px',
+    fontSize: 14,
+    fontWeight: 700,
+    boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+    minWidth: 200,
+  };
+  const labelStyle: React.CSSProperties = {
+    color: primary,
+    fontWeight: 800,
+    fontSize: 15,
+    marginBottom: 8,
+    paddingBottom: 4,
+    borderBottom: '1px solid rgba(128,128,128,0.2)',
+  };
+  const rowStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 16, padding: '2px 0' };
+  const subRowStyle: React.CSSProperties = { ...rowStyle, opacity: 0.7, fontSize: 12, paddingLeft: 10 };
+  const valStyle: React.CSSProperties = { fontFamily: '"JetBrains Mono", monospace', fontWeight: 900 };
+
+  const formatVal = (v: any) => (v == null ? '—' : String(Number(v.toFixed ? v.toFixed(1) : v)));
+
+  // Determine which indicators to show breakdown for
+  const showOpenedBreakdown = (isManagement ? currentIndicator === 'Opened Cases' : indicators.includes('Opened Cases'));
+  const showClosedBreakdown = (isManagement ? currentIndicator === 'Closed Cases' : indicators.includes('Closed Cases'));
+
+  return (
+    <div style={containerStyle}>
+      <div style={labelStyle}>{dateLabel}</div>
+      {payload.map((p: any, i: number) => {
+        const color = p.color || primary;
+        const name  = p.name as string;
+        const val   = p.value;
+
+        // For management chart: determine if this line carries an Opened or Closed breakdown
+        const lineIsOpened = isManagement ? showOpenedBreakdown : name === 'Opened Cases';
+        const lineIsClosed = isManagement ? showClosedBreakdown : name === 'Closed Cases';
+        const isMember = name === 'Member Individual';
+
+        // Select the right breakdown fields
+        const infoKey      = isMember ? '_mOpenedInfo'      : '_openedInfo';
+        const complaintKey = isMember ? '_mOpenedComplaint' : '_openedComplaint';
+        const cInfoKey     = isMember ? '_mClosedInfo'      : '_closedInfo';
+        const cComplaintKey= isMember ? '_mClosedComplaint' : '_closedComplaint';
+
+        return (
+          <React.Fragment key={i}>
+            <div style={rowStyle}>
+              <span style={{ color }}>{name}</span>
+              <span style={{ ...valStyle, color }}>{formatVal(val)}</span>
+            </div>
+            {(lineIsOpened) && (
+              <>
+                <div style={subRowStyle}>
+                  <span>↳ Information</span>
+                  <span style={valStyle}>{pt[infoKey] ?? 0}</span>
+                </div>
+                <div style={subRowStyle}>
+                  <span>↳ Complaint</span>
+                  <span style={valStyle}>{pt[complaintKey] ?? 0}</span>
+                </div>
+              </>
+            )}
+            {(lineIsClosed) && (
+              <>
+                <div style={subRowStyle}>
+                  <span>↳ Information</span>
+                  <span style={valStyle}>{pt[cInfoKey] ?? 0}</span>
+                </div>
+                <div style={subRowStyle}>
+                  <span>↳ Complaint</span>
+                  <span style={valStyle}>{pt[cComplaintKey] ?? 0}</span>
+                </div>
+              </>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
 interface AgentViewProps {
   member?: User | null;
 }
@@ -756,7 +872,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const dbTrendByBucket = React.useMemo(() => {
     type Bucket = {
       'Opened Cases': number;
+      'Opened Cases Information': number;
+      'Opened Cases Complaint': number;
       'Closed Cases': number;
+      'Closed Cases Information': number;
+      'Closed Cases Complaint': number;
       'Closed Cases Rate': number;
       'Incoming Calls': number;
       'Still Open Cases': number;
@@ -768,20 +888,34 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const FMT = 'M/D/YYYY h:mm A';
 
     const ensure = (k: string): Bucket => {
-      if (!out[k]) out[k] = { 'Opened Cases': 0, 'Closed Cases': 0, 'Closed Cases Rate': 0, 'Incoming Calls': 0, 'Still Open Cases': 0 };
+      if (!out[k]) out[k] = {
+        'Opened Cases': 0, 'Opened Cases Information': 0, 'Opened Cases Complaint': 0,
+        'Closed Cases': 0, 'Closed Cases Information': 0, 'Closed Cases Complaint': 0,
+        'Closed Cases Rate': 0, 'Incoming Calls': 0, 'Still Open Cases': 0
+      };
       return out[k];
     };
 
-    // Abiertos → Opened/Closed counts per bucket
+    const REASON_INFO      = 'Information & Assistance requests';
+    const REASON_COMPLAINT = 'Complaint';
+
+    // Abiertos → Opened/Closed counts per bucket (+ Information / Complaint breakdown)
     if (dbCases) {
       dbCases.forEach(c => {
+        const reason = c?.contact_reason_1 as string | null | undefined;
         const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
         if (opened && opened.isValid() && opened.isBetween(startDate, endDate, 'day', '[]')) {
-          ensure(opened.format(formatStr))['Opened Cases']++;
+          const k = opened.format(formatStr);
+          ensure(k)['Opened Cases']++;
+          if (reason === REASON_INFO)      ensure(k)['Opened Cases Information']++;
+          if (reason === REASON_COMPLAINT) ensure(k)['Opened Cases Complaint']++;
         }
         const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
         if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
-          ensure(closed.format(formatStr))['Closed Cases']++;
+          const k = closed.format(formatStr);
+          ensure(k)['Closed Cases']++;
+          if (reason === REASON_INFO)      ensure(k)['Closed Cases Information']++;
+          if (reason === REASON_COMPLAINT) ensure(k)['Closed Cases Complaint']++;
         }
       });
 
@@ -1044,6 +1178,15 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         const isInt = ['NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls'].includes(indicator);
         entry[indicator] = isInt ? Math.round(sum / items.length) : Number((sum / items.length).toFixed(1));
       });
+
+      // Always inject Opened/Closed case breakdown so the tooltip can show
+      // Information & Complaint sub-counts regardless of which indicator is
+      // currently selected (these fields are NOT mapped to any <Line>).
+      const ob = dbTrendByBucket.out[key];
+      entry['_openedInfo']      = ob?.['Opened Cases Information'] ?? 0;
+      entry['_openedComplaint'] = ob?.['Opened Cases Complaint']   ?? 0;
+      entry['_closedInfo']      = ob?.['Closed Cases Information'] ?? 0;
+      entry['_closedComplaint'] = ob?.['Closed Cases Complaint']   ?? 0;
 
       return entry;
     }).sort((a, b) => a.name.localeCompare(b.name));
@@ -1353,6 +1496,35 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         ...Object.keys(dbTrendByBucket.fcrByBucket),
       ]);
 
+      // Pre-compute per-member case breakdown for the tooltip (Opened/Closed only)
+      const FMT2 = 'M/D/YYYY h:mm A';
+      const memberCompass = selectedTeamMember ? users[selectedTeamMember]?.compass : null;
+      const memberBreakdown: Record<string, {
+        'Opened Cases Information': number; 'Opened Cases Complaint': number;
+        'Closed Cases Information': number; 'Closed Cases Complaint': number;
+      }> = {};
+      const REASON_INFO2      = 'Information & Assistance requests';
+      const REASON_COMPLAINT2 = 'Complaint';
+      if (memberCompass && dbCases && (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases')) {
+        dbCases.filter(c => c.case_owner === memberCompass).forEach(c => {
+          const reason = c?.contact_reason_1 as string | null | undefined;
+          const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT2) : null;
+          if (opened && opened.isValid() && opened.isBetween(startDate, endDate, 'day', '[]')) {
+            const k = opened.format(formatStr);
+            if (!memberBreakdown[k]) memberBreakdown[k] = { 'Opened Cases Information': 0, 'Opened Cases Complaint': 0, 'Closed Cases Information': 0, 'Closed Cases Complaint': 0 };
+            if (reason === REASON_INFO2)      memberBreakdown[k]['Opened Cases Information']++;
+            if (reason === REASON_COMPLAINT2) memberBreakdown[k]['Opened Cases Complaint']++;
+          }
+          const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT2) : null;
+          if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
+            const k = closed.format(formatStr);
+            if (!memberBreakdown[k]) memberBreakdown[k] = { 'Opened Cases Information': 0, 'Opened Cases Complaint': 0, 'Closed Cases Information': 0, 'Closed Cases Complaint': 0 };
+            if (reason === REASON_INFO2)      memberBreakdown[k]['Closed Cases Information']++;
+            if (reason === REASON_COMPLAINT2) memberBreakdown[k]['Closed Cases Complaint']++;
+          }
+        });
+      }
+
       return Array.from(allKeys).sort().map(key => {
         const teamVal = teamValueOf(key);
         const entry: any = { name: key, fullDate: key, 'Team Average': teamVal };
@@ -1363,6 +1535,18 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
             entry['Member Individual'] = memberBuckets[key] ?? null;
           }
         }
+        // Team breakdown (always available from dbTrendByBucket.out)
+        const ob = dbTrendByBucket.out[key];
+        entry['_openedInfo']      = ob?.['Opened Cases Information'] ?? 0;
+        entry['_openedComplaint'] = ob?.['Opened Cases Complaint']   ?? 0;
+        entry['_closedInfo']      = ob?.['Closed Cases Information'] ?? 0;
+        entry['_closedComplaint'] = ob?.['Closed Cases Complaint']   ?? 0;
+        // Member breakdown (only when member selected + relevant indicator)
+        const mb = memberBreakdown[key];
+        entry['_mOpenedInfo']      = mb?.['Opened Cases Information'] ?? 0;
+        entry['_mOpenedComplaint'] = mb?.['Opened Cases Complaint']   ?? 0;
+        entry['_mClosedInfo']      = mb?.['Closed Cases Information'] ?? 0;
+        entry['_mClosedComplaint'] = mb?.['Closed Cases Complaint']   ?? 0;
         return entry;
       });
     }
@@ -1727,14 +1911,49 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       ratio between individual contribution and team aggregate. */}
                   <YAxis tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: isDark ? '#000A1A' : '#fff', borderRadius: 8, border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
-                    formatter={(val: any) => {
-                      if (val == null) return '—';
-                      if (currentIndicator === 'QA' || currentIndicator === 'Backlog' || currentIndicator === '% First Contact Resolution') return `${formatValue(val)}%`;
-                      if (currentIndicator === 'NSAT' || currentIndicator === 'NSAT Information' || currentIndicator === 'NSAT Claims') {
-                        return String(formatValue(val, true));
+                    content={(props: any) => {
+                      // Use CasesTooltip only when the selected indicator has a breakdown;
+                      // otherwise fall back to Recharts' default rendering via the prop.
+                      const { active, payload } = props;
+                      if (!active || !payload?.length) return null;
+                      if (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases') {
+                        return (
+                          <CasesTooltip
+                            {...props}
+                            indicators={[currentIndicator]}
+                            isManagement
+                            currentIndicator={currentIndicator}
+                            selectedTeamMember={selectedTeamMember}
+                            isDark={isDark}
+                            primaryColor={theme.palette.primary.main}
+                            hierarchy={hierarchy}
+                          />
+                        );
                       }
-                      return val.toFixed(1);
+                      // Default: show values with appropriate formatting
+                      const pt = payload[0].payload;
+                      const dateLabel = (() => {
+                        const d = dayjs(pt.fullDate || pt.name);
+                        if (!d.isValid()) return pt.name;
+                        if (hierarchy === 'day')   return d.format('DD MMMM YYYY');
+                        if (hierarchy === 'week')  return d.format('[Week] ww, YYYY');
+                        if (hierarchy === 'month') return d.format('MMMM YYYY');
+                        return d.format('YYYY');
+                      })();
+                      return (
+                        <div style={{ backgroundColor: isDark ? 'rgba(0,8,20,0.95)' : '#fff', border: `2px solid ${theme.palette.primary.main}`, borderRadius: 8, padding: '10px 14px', fontSize: 14, fontWeight: 700, boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                          <div style={{ color: theme.palette.primary.main, fontWeight: 800, marginBottom: 6 }}>{dateLabel}</div>
+                          {payload.map((p: any, i: number) => {
+                            const raw = p.value;
+                            let display: string;
+                            if (raw == null) { display = '—'; }
+                            else if (currentIndicator === 'QA' || currentIndicator === 'Backlog' || currentIndicator === '% First Contact Resolution') { display = `${formatValue(raw)}%`; }
+                            else if (currentIndicator === 'NSAT' || currentIndicator === 'NSAT Information' || currentIndicator === 'NSAT Claims') { display = String(formatValue(raw, true)); }
+                            else { display = raw.toFixed(1); }
+                            return <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}><span style={{ color: p.color }}>{p.name}</span><span style={{ fontFamily: '"JetBrains Mono", monospace', fontWeight: 900 }}>{display}</span></div>;
+                          })}
+                        </div>
+                      );
                     }}
                   />
                   <Legend />
@@ -1992,38 +2211,50 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                         domain={[0, 'auto']}
                       />
                     )}
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: isDark ? 'rgba(0, 8, 20, 0.95)' : '#fff',
-                        border: `2px solid ${theme.palette.primary.main}`,
-                        borderRadius: 8,
-                        fontSize: 20,
-                        fontWeight: 800,
-                        zIndex: 1000,
-                        boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
-                      }}
-                      itemStyle={{ fontSize: 18, padding: '4px 0' }}
-                      labelStyle={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}
-                      formatter={(val: any, name: string) => {
-                        if (val == null) return ['—', name];
-                        if (name === 'QA')                return [`${formatValue(val)}%`, name];
-                        if (name === 'NSAT')              return [String(formatValue(val, true)), name]; // -100…+100 integer, no %
-                        if (name === 'NSAT Information')  return [String(formatValue(val, true)), name];
-                        if (name === 'NSAT Claims')       return [String(formatValue(val, true)), name];
-                        if (name === 'Backlog')           return [`${formatValue(val, true)}%`, name];   // integer %
-                        if (name === '% First Contact Resolution') return [`${formatValue(val)}%`, name]; // decimal %
-                        const isInt = ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(name)
-                          || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(si));
-                        return [formatValue(val, isInt), name];
-                      }}
-                      labelFormatter={(label, payload) => {
-                        if (payload && payload[0]) {
-                          const date = payload[0].payload.fullDate;
-                          return dayjs(date).format(hierarchy === 'day' ? 'DD MMMM YYYY' : 
-                                                   hierarchy === 'week' ? '[Week] ww, YYYY' :
-                                                   hierarchy === 'month' ? 'MMMM YYYY' : 'YYYY');
+                    <Tooltip
+                      content={(props: any) => {
+                        const hasBreakdown = selectedIndicators.some(i => i === 'Opened Cases' || i === 'Closed Cases');
+                        if (hasBreakdown) {
+                          return (
+                            <CasesTooltip
+                              {...props}
+                              indicators={selectedIndicators}
+                              isDark={isDark}
+                              primaryColor={theme.palette.primary.main}
+                              hierarchy={hierarchy}
+                            />
+                          );
                         }
-                        return label;
+                        // Default rendering (no breakdown needed)
+                        const { active, payload } = props;
+                        if (!active || !payload?.length) return null;
+                        const pt = payload[0].payload;
+                        const dateLabel = (() => {
+                          const d = dayjs(pt.fullDate || pt.name);
+                          if (!d.isValid()) return pt.name;
+                          if (hierarchy === 'day')   return d.format('DD MMMM YYYY');
+                          if (hierarchy === 'week')  return d.format('[Week] ww, YYYY');
+                          if (hierarchy === 'month') return d.format('MMMM YYYY');
+                          return d.format('YYYY');
+                        })();
+                        return (
+                          <div style={{ backgroundColor: isDark ? 'rgba(0,8,20,0.95)' : '#fff', border: `2px solid ${theme.palette.primary.main}`, borderRadius: 8, padding: '12px 16px', fontSize: 20, fontWeight: 800, zIndex: 1000, boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                            <div style={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}>{dateLabel}</div>
+                            {payload.map((p: any, i: number) => {
+                              const val = p.value; const name = p.name as string;
+                              let display: string;
+                              if (val == null) { display = '—'; }
+                              else if (name === 'QA' || name === 'Backlog') { display = `${formatValue(val)}%`; }
+                              else if (name === '% First Contact Resolution') { display = `${formatValue(val)}%`; }
+                              else if (['NSAT', 'NSAT Information', 'NSAT Claims'].includes(name)) { display = String(formatValue(val, true)); }
+                              else {
+                                const isInt = ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(name) || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(si));
+                                display = String(formatValue(val, isInt));
+                              }
+                              return <div key={i} style={{ fontSize: 18, padding: '4px 0', display: 'flex', justifyContent: 'space-between', gap: 20 }}><span style={{ color: p.color }}>{name}</span><span style={{ fontFamily: '"JetBrains Mono", monospace' }}>{display}</span></div>;
+                            })}
+                          </div>
+                        );
                       }}
                     />
                     <Legend verticalAlign="bottom" height={36} iconType="circle" iconSize={12} wrapperStyle={{ fontSize: 14, fontWeight: 800, paddingTop: 25 }} />
