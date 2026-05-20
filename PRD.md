@@ -196,6 +196,7 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 - **Migración progresiva mock → Neon (Stellantis):** once indicadores del line chart de `AgentView` ya provienen de Neon — `Opened Cases`, `Closed Cases`, `Closed Cases Rate`, `Incoming Calls` (suma de dos tablas), `QA` (merge de dos tablas), `NSAT` (merge de dos tablas), `NSAT Information`, `NSAT Claims` (slices del NSAT por `contact_reason_1`), dos indicadores grupales CAC: `Still Open Cases` y `Backlog`, y `% First Contact Resolution` (ratio de casos cerrados el mismo día en que se abrieron). Tanto la línea agregada del equipo como la individual del miembro seleccionado en el ranking salen de BD en las vistas de management. Ver §11 para fórmulas, joins y formato por indicador
 - Despliegue en Vercel con `api/index.ts` como serverless function en `orbit-2-weld.vercel.app`. `engines.node` pineado a `22.x`, `@neondatabase/serverless` eliminado del path de cold start, `pg` y `dayjs` cargados lazy desde dentro de los handlers
 - Rango de fechas default del dashboard: **desde el inicio del mes anterior hasta el fin del mes actual** (`dayjs().subtract(1, 'month').startOf('month')` → `dayjs().endOf('month')`). Para indicadores que requieren contexto histórico mayor (Backlog → 3 meses prior), el fetch correspondiente extiende su propio rango sin afectar la ventana visible
+- **Tooltip con desglose de Opened/Closed Cases**: cuando el indicador activo es `Opened Cases` o `Closed Cases`, el tooltip del line chart muestra tres filas: total + `↳ Information` + `↳ Complaint` (filtradas por `contact_reason_1`). Funciona en todas las vistas (Agent, Leader, Manager, Executive). En management muestra el desglose independiente para Team Average y Member Individual
 - Aislamiento de sesión al cerrar
 
 ### Pendiente de implementar
@@ -395,10 +396,11 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 
 **Bucketing por indicador**:
 - `dbTrendByBucket` retorna `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket }`:
-  - `out` — buckets con valores tipo COUNT/SUM/SNAPSHOT (0 es legítimo). Incluye Opened, Closed, Incoming Calls, Still Open Cases.
+  - `out` — buckets con valores tipo COUNT/SUM/SNAPSHOT (0 es legítimo). Incluye `Opened Cases`, `Closed Cases`, `Incoming Calls`, `Still Open Cases` y cuatro contadores de desglose: `Opened Cases Information`, `Opened Cases Complaint`, `Closed Cases Information`, `Closed Cases Complaint` (filtrados por `contact_reason_1` de `Abiertos`).
   - Los `xxxByBucket` — buckets con valores tipo AVG / INDEX / RATIO (bucket ausente = sin datos → null en el chart, **gap visible con línea conectada**).
 - `<Line connectNulls={...}>` activado para QA, NSAT, NSAT Information, NSAT Claims, Backlog y % FCR (los que pueden tener buckets ausentes).
-- Tooltip y `LabelList` formatean por indicador: `% suffix` para QA y Backlog; entero raw `[-100..+100]` para NSAT, NSAT Information y NSAT Claims; defaults para counts.
+- `LabelList` formatea por indicador: `% suffix` para QA y Backlog; entero raw `[-100..+100]` para NSAT y slices; defaults para counts.
+- **`CasesTooltip`** (componente file-scope en `AgentView.tsx`): reemplaza el tooltip por defecto de Recharts cuando el indicador activo es `Opened Cases` o `Closed Cases`. Muestra tres filas (total + `↳ Information` + `↳ Complaint`) por línea del chart. Los campos de desglose (`_openedInfo`, `_openedComplaint`, `_closedInfo`, `_closedComplaint`) se inyectan siempre en cada punto de `trendData` y `aggregatedTrendData` como metadata (no mapeados a ningún `<Line>`). Para la línea `Member Individual` en management usa claves `_mOpenedInfo` / `_mOpenedComplaint` / `_mClosedInfo` / `_mClosedComplaint` (breakdown calculado filtrando `dbCases` por `compass` del miembro).
 - Helper `buildNsatIndex(rows)` encapsula la fórmula NPS y se invoca tres veces (total + Information + Claims) sobre subconjuntos filtrados de `dbNSAT`. Usar el mismo patrón si aparece otro indicador "slice" de NSAT en el futuro.
 
 **Indicadores team-wide CAC** (`Still Open Cases`, `Backlog`):

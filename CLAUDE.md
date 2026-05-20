@@ -101,10 +101,10 @@ See **PRD §11** for formulas, join keys, display format, and pending indicators
 Key wiring points in `AgentView.tsx`:
 - `DB_INDICATORS` Set — add an indicator name here to promote it from mock to Neon.
 - `dbTrendByBucket` — returns `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket }`:
-  - `out` — count/sum/snapshot values (`0` is valid).
+  - `out` — count/sum/snapshot values (`0` is valid). Includes `Opened Cases`, `Closed Cases`, `Incoming Calls`, `Still Open Cases`, plus four breakdown counts: `Opened Cases Information`, `Opened Cases Complaint`, `Closed Cases Information`, `Closed Cases Complaint` (filtered by `contact_reason_1`).
   - `xxxByBucket` — avg/index/ratio values; missing bucket → `null` → gap rendered with `connectNulls={true}`.
 - `scopeIsCAC` — gates CAC-only fetches (`Still Open Cases`, `Backlog`).
 - `memberBuckets` / `memberValuesForRanking` — per-member recomputation for the management ranking line and sort order.
 - Team + Member lines share **one Y axis** — do not reintroduce a right axis.
 
-When adding a new indicator, touch: `indicatorOptions`, tooltip/LabelList formatters, `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`.
+When adding a new indicator, touch: `indicatorOptions`, `CasesTooltip` (if it needs breakdown rows), `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`.
