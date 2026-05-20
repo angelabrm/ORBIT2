@@ -89,8 +89,9 @@ const ProjectManagerView: React.FC<{ member?: any }> = ({ member }) => {
     baseStats.closedCasesPerHour /= rfcs.length;
     baseStats.fcr /= rfcs.length;
 
-    // Opened cases from DB
-    const openedCases = dbCases.filter(c => rfcs.includes(c.case_owner)).length || 1;
+    // Opened cases from DB — case_owner is Compass ID, not RFC; map first
+    const compassIds = rfcs.map(rfc => users[rfc]?.compass).filter((c): c is string => !!c);
+    const openedCases = dbCases.filter(c => compassIds.includes(c.case_owner)).length || 1;
     const closedCasesRateScore = Math.min(100, (baseStats.closedCases / openedCases) * 100);
 
     // 2. Final scores matching AgentView.tsx exactly
