@@ -1,135 +1,110 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this repository.
-
-> Product requirements, role definitions, business rules, and Pepsico PM spec → [PRD.md](PRD.md).
+> Product requirements, role definitions, business rules, Pepsico PM spec, and migration status → [PRD.md](PRD.md).
 
 ## Commands
 
 ```bash
-npm install          # Install dependencies
-npm run dev          # Start dev server (Express + Vite HMR) on port 3000
-npm run build        # Production build via Vite
-npm run lint         # TypeScript type-check (tsc --noEmit)
-npm run preview      # Preview production build
-npm run clean        # Remove dist/
+npm run dev      # Express + Vite HMR on port 3000
+npm run build    # Production build
+npm run lint     # tsc --noEmit — run before every commit
+npm run preview  # Preview prod build
+npm run clean    # Remove dist/
 ```
 
-Node.js >= 20.0.0 required. Always run `npm run lint` before committing.
+Node.js >= 20.0.0 required.
 
 ## Environment
 
 Copy `.env.example` to `.env`:
-- `DATABASE_URL` or `NEON_DB_URL` — Neon PostgreSQL (optional; `/api/opened-cases` degrades to 503 without it)
-- `GEMINI_API_KEY` — Google Gemini (only required for AI features)
-- `GOOGLE_SHEETS_ID` — Roster spreadsheet ID (default value present in code, no creds needed since the sheet is public)
+- `DATABASE_URL` / `NEON_DB_URL` — Neon PostgreSQL
+- `GEMINI_API_KEY` — Google Gemini (AI features only)
+- `GOOGLE_SHEETS_ID` — Roster sheet (default in code; public sheet, no creds needed)
 
 ## Architecture
 
-React 19 + Vite frontend, Express 4 backend. Two parallel server entry points share roster logic but run in different environments — keep them in sync when changing API behavior.
-
-### Backend entry points
+React 19 + Vite frontend, Express 4 backend. Two parallel entry points — keep in sync:
 
 | File | Used by |
 |---|---|
-| `server.ts` | Local dev (`npm run dev`) — Express with Vite middleware, full HMR |
-| `api/index.ts` | Vercel production — same Express app exported as a serverless function |
+| `server.ts` | Local dev — Express + Vite HMR |
+| `api/index.ts` | Vercel — same app as serverless function |
 
-`vercel.json` rewrites `/api/*` → `/api/index` and everything else → `/index.html`. `engines.node` is pinned to `22.x` in `package.json` (Node 24 broke the bundle).
+`vercel.json`: `/api/*` → `/api/index`, everything else → `/index.html`. Node pinned to `22.x`.
 
-**Vercel function landmines** — `api/index.ts` is a single-file Express handler. Some things will silently crash the cold start (FUNCTION_INVOCATION_FAILED with no log line) unless you keep them out of the module-load path:
-- `@neondatabase/serverless` cannot be imported at module scope (not even via `typeof import(...)` in a type position). Removed entirely.
-- `pg` is dynamically imported inside `getPool()` — never at the top of the file.
-- `dayjs` parsing is also kept lazy; the file has its own `parseOpenedAt()` regex to avoid pulling `dayjs/plugin/customParseFormat` into the cold start.
-- If you add a new DB library or heavy package, follow the same pattern: import it inside the handler that needs it, not at module top.
+**`api/index.ts` cold-start rules** — violations silently crash with no log:
+- Never import `@neondatabase/serverless` at module scope (removed entirely).
+- `pg` is dynamically imported inside `getPool()`.
+- `dayjs/plugin/customParseFormat` is not imported; `parseOpenedAt()` uses a regex instead.
+- Follow the same lazy-import pattern for any new heavy package.
 
 ### Endpoints
 
 | Endpoint | Purpose |
 |---|---|
-| `GET  /api/health` | DB connectivity check |
-| `GET  /api/roster` | All Roster users from Google Sheets (5-min cache). Exposes `compass`, `callPicker`, `qa`, `genesys` join keys |
-| `POST /api/login` | RFC lookup against Roster |
-| `GET  /api/opened-cases` | Abiertos rows (filtered by `case_owner` ↔ `Roster.compass`) |
-| `GET  /api/incoming-calls` | Merges Actividad (`User` ↔ `Roster.callPicker`) + Rendimiento_Agente (`nombre_del_agente` ↔ `Roster.genesys`); values are summed downstream |
-| `GET  /api/qa` | Merges QA + QA_Premium (`Agente`/`Agent` ↔ `Roster.qa`); weighted per-row score |
-| `GET  /api/nsat` | Merges NSAT (`case_owner`) + NSAT_Premium (`agent_full_name`) both ↔ `Roster.compass`; ships Q1/Q2/Q3 scores |
-| `GET  /api/still-open-cases` | Aun_Abiertos rows (team-wide CAC backlog snapshot; no user filter) |
+| `GET /api/health` | DB check |
+| `GET /api/roster` | Google Sheets users, 5-min cache; exposes `compass`, `callPicker`, `qa`, `genesys` join keys |
+| `POST /api/login` | RFC lookup |
+| `GET /api/opened-cases` | `Abiertos` — rows where `datetime_opened` **or** `datetime_closed` falls in range |
+| `GET /api/incoming-calls` | `Actividad` + `Rendimiento_Agente` merged |
+| `GET /api/qa` | `QA` + `QA_Premium` merged |
+| `GET /api/nsat` | `NSAT` + `NSAT_Premium` merged; ships Q1/Q2/Q3 |
+| `GET /api/still-open-cases` | `Aun_Abiertos` — CAC-wide backlog snapshot |
 
-The Roster is fetched from Google Sheets via the public CSV export URL (`gviz/tq?tqx=out:csv`) — **no service account or credentials**. If that ever changes (sheet made private), `fetchRosterFromSheets()` lives in both `server.ts` and `api/index.ts` and must be updated in both.
+Roster fetched via public CSV (`gviz/tq?tqx=out:csv`) — no service account. If the sheet goes private, update `fetchRosterFromSheets()` in **both** `server.ts` and `api/index.ts`.
 
-**Date columns from Neon**: emit `dateStr: "YYYY-MM-DD"` (string) from the backend, not just `dateMs`. Reading `dayjs(dateMs)` on the frontend shifts by the browser's TZ offset and slides every datapoint by a day for users west of UTC. The helpers `parseSourceName`, `parseMarcaTemporal`, and `parseDateFlex` all return both fields — frontend bucketing reads `dateStr`.
+**Date columns**: always emit `dateStr: "YYYY-MM-DD"` from the backend alongside `dateMs`. Frontend bucketing always reads `dateStr` — `dayjs(dateMs)` shifts by TZ offset for users west of UTC.
 
 ### Frontend layout
 
 ```
 src/
-├── context/AuthContext.tsx   Global state: user, users (RFC→User map), selectedMember, managementTab, dateRange
-├── services/apiService.ts    fetchOpenedCases / fetchIncomingCalls / fetchQA / fetchNSAT
+├── context/AuthContext.tsx        user, users (RFC→User map), selectedMember, managementTab, dateRange
+├── services/apiService.ts         fetch helpers for all endpoints
 ├── data/
-│   ├── mockData.ts           METRICS_DATA + getFilteredMetrics() + generateHistoricalData() (no user data)
-│   └── pepsicoMockData.ts    Shared Pepsico mock layer: generateCampaignsForPM, generatePMMetrics,
-│                             buildPMTrendData, buildTeamAvgTrendData — all RFC-seeded deterministic
+│   ├── mockData.ts                METRICS_DATA, getFilteredMetrics(), generateHistoricalData()
+│   └── pepsicoMockData.ts         RFC-seeded deterministic Pepsico mock (PMView + PepsicoManagerView)
 └── components/
-    ├── App.tsx               ThemeProvider + AuthProvider + Login/Dashboard
-    ├── Dashboard.tsx         Role dispatch → View; member wrapper uses flex:1/minHeight:0 so
-    │                         percentage-height rows in PMView resolve to real pixels
-    ├── Sidebar.tsx           Date pickers, management tabs, member dropdown
-    ├── Login.tsx             RFC entry, async login via /api/login
+    ├── App.tsx / Dashboard.tsx / Sidebar.tsx / Login.tsx
     └── Views/
-        ├── AgentView.tsx              Agent/Leader (~1900 lines)
-        ├── ProjectManagerView.tsx     Manager/Executive operational + admin tabs (Stellantis)
+        ├── AgentView.tsx              Agent + Leader (~1900 lines); owns DB_INDICATORS migration
+        ├── ProjectManagerView.tsx     Manager + Executive operational/admin (Stellantis)
         ├── FinancialView.tsx          Executive only
-        ├── ExecutiveView.tsx          Exists, NOT yet wired into Dashboard routing
-        ├── PMView.tsx                 Pepsico PM — accepts member? prop for "view as"
-        └── PepsicoManagerView.tsx     Pepsico Manager — team ranking, avg KPI, aggregated charts
+        ├── ExecutiveView.tsx          Exists — NOT yet wired into Dashboard routing
+        ├── PMView.tsx                 Pepsico PM; accepts member? for "view as"
+        └── PepsicoManagerView.tsx     Pepsico Manager — ranking, aggregated charts
 ```
 
 ### Conventions
 
-- Use `ManagementIndicator` for all KPI cards — it carries the formula tooltip, color logic, and the quartile band. Defined in `AgentView.tsx`; `PMView.tsx` keeps its own slightly tighter copy (smaller value font + `whiteSpace: nowrap`) because its cards are narrower. When extracting a shared component, preserve both sizing variants.
-- All Recharts charts share the same dark/light tooltip + axis styling. When adding a new chart, mirror the props from `AgentView.tsx` (CartesianGrid `vertical={false}`, primary-color stroke axes, `strokeWidth={4}` lines with hollow dots).
-- MUI 9 `sx` prop for styles. Tailwind 4 is available via `@tailwindcss/vite` for utility classes.
-- `dayjs` with `customParseFormat` for date handling; date pickers from `@mui/x-date-pickers`.
-- `motion` (Framer Motion fork) for animation, `lucide-react` + `@mui/icons-material` for icons.
-
-### HMR
-
-`DISABLE_HMR=true` disables Vite HMR (used in environments like AI Studio that flicker during agent edits).
+- **KPI cards** — use `ManagementIndicator` (defined in `AgentView.tsx`; `PMView.tsx` has a tighter copy for narrower cards).
+- **Charts** — mirror `AgentView.tsx` props: `CartesianGrid vertical={false}`, primary-color axes, `strokeWidth={4}` lines with hollow dots.
+- **Styles** — MUI 9 `sx` prop; Tailwind 4 via `@tailwindcss/vite` for utilities.
+- **Dates** — `dayjs` + `customParseFormat`; pickers from `@mui/x-date-pickers`.
+- **Icons** — `lucide-react` + `@mui/icons-material`. **Animations** — `motion` (Framer Motion fork).
+- **HMR** — set `DISABLE_HMR=true` in environments that flicker during edits.
 
 ## UI Rules
 
-- Never let text overlap. Use flex/grid flow — never absolute positioning for text.
-- Truncate when content exceeds container: `text-overflow: ellipsis` (single line) or `line-clamp` (multi-line).
-- Containers must allow dynamic growth — avoid fixed heights with variable text.
-- Validate responsive at mobile, tablet, desktop.
+- No text overlap — use flex/grid flow, never absolute positioning for text.
+- Truncate overflowing text: `text-overflow: ellipsis` (single line) or `line-clamp` (multi-line).
+- Containers must grow with content — avoid fixed heights with variable text.
 
-## Working with Roster data
+## Roster data
 
-User data is **never** hardcoded. `MOCK_USERS` no longer exists. Components read users from `useAuth().users` (RFC→User map populated from `/api/roster` on mount). When adding a feature that needs to look up a user by RFC, by role, or by serviceDesk, use `Object.values(users).find(...)` — don't reach for a static map.
+User data is **never** hardcoded. Read from `useAuth().users` (RFC→User map, populated from `/api/roster`). Lookup pattern: `Object.values(users).find(...)`. `case_owner` in DB rows is a **Compass ID** — map RFC→`users[rfc]?.compass` before filtering.
 
-## Progressive migration: mock → Neon
+## Mock → Neon migration (Stellantis, `AgentView.tsx`)
 
-The Stellantis trend chart in `AgentView.tsx` is moving from synthetic `generateHistoricalData(rfc)` mock to real (anonymized) Neon data. See PRD §11 for the per-indicator status, formulas, and join keys.
+See **PRD §11** for formulas, join keys, display format, and pending indicators.
 
-The wiring inside the component:
+Key wiring points in `AgentView.tsx`:
+- `DB_INDICATORS` Set — add an indicator name here to promote it from mock to Neon.
+- `dbTrendByBucket` — returns `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket }`:
+  - `out` — count/sum/snapshot values (`0` is valid).
+  - `xxxByBucket` — avg/index/ratio values; missing bucket → `null` → gap rendered with `connectNulls={true}`.
+- `scopeIsCAC` — gates CAC-only fetches (`Still Open Cases`, `Backlog`).
+- `memberBuckets` / `memberValuesForRanking` — per-member recomputation for the management ranking line and sort order.
+- Team + Member lines share **one Y axis** — do not reintroduce a right axis.
 
-- `DB_INDICATORS` Set — indicator names that should pull from BD instead of mock. Add to this set to "promote" a new indicator.
-- `scopeIsCAC` boolean — true when the current scope is the CAC team (Agent/Leader with `serviceDesk === 'CAC'`, or Manager/Executive currently filtering `selectedDept === 'CAC'`). Gates the team-wide CAC indicators (Still Open Cases, Backlog).
-- `dbTrendByBucket` useMemo returns `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket }`:
-  - `out` holds **count/sum-style** values (Opened, Closed, Incoming Calls, Still Open Cases) where `0` is a legitimate datapoint.
-  - The `xxxByBucket` maps hold **average / index / ratio** values where empty buckets are *absent* from the map — the trendData consumer renders `null` for those so Recharts shows a gap. These indicators opt into `connectNulls={true}` so the line still bridges the gap.
-- Still Open Cases is a **snapshot** (uses the latest day in a bucket, not the sum); Backlog is a **ratio** computed against monthly opened-case totals from the unfiltered `dbOpenedAll` set (loaded only when `scopeIsCAC`, with the fetch range extended 3 months before `startDate` so the prior months Backlog needs are always present regardless of the user-selected window).
-- `NSAT Information` / `NSAT Claims` reuse the NSAT formula over a subset of rows filtered by `contactReason1` — call `buildNsatIndex(rows)` with the filtered array. Same pattern for any future indicator that's a slice of an existing one.
-- New BD-backed indicators with average/ratio/index semantics should follow the `xxxByBucket` pattern. Counts and snapshots can stay in `out`.
-
-**Management views (Leader / Manager / Executive)** use the same `dbTrendByBucket` (it's already team-aggregated for management roles since `loadDbData` fetches every team member's data) plus two helpers:
-- `memberBuckets` — recomputes the current indicator for the selected ranking member by filtering the team-wide arrays to that member's join keys. Powers the dashed "Member Individual" line. Returns `null` for team-wide indicators; the chart then mirrors the team value into the individual line.
-- `memberValuesForRanking` — single number per team member, used to sort the Team Members Ranking by the selected indicator (instead of the mock-based default).
-- The Team and Member lines render on a **single shared Y axis** so the visual ratio between team aggregate and individual contribution is directly readable. Don't reintroduce a right axis.
-
-When adding a new indicator, touch:
-- `indicatorOptions` dropdown (KPIs are aggregates of multiple indicators; Indicators come from a single source table or a fixed formula).
-- Tooltip + LabelList formatters in the LineChart — add a `% suffix` / integer / no-suffix branch as needed (QA shows `92.8%`; NSAT/Information/Claims show `-33`; Backlog shows `42%`; counts show raw integer).
-- `memberBuckets`, `memberValuesForRanking`, and `teamValueOf` in `aggregatedTrendData` — same indicator branch in all three.
-- If team-wide (CAC-only), gate the fetch behind `scopeIsCAC` and skip the per-member helpers so the indicator mirrors the team value when a member is selected.
+When adding a new indicator, touch: `indicatorOptions`, tooltip/LabelList formatters, `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`.
