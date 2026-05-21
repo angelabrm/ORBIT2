@@ -268,9 +268,9 @@ async function startServer() {
 
       const out = rows
         .map((row: any) => {
-          const d = dayjs(row['closed_date'], 'M/D/YYYY h:mm A');
+          const d = dayjs(row['closed_date'], 'M/D/YYYY');
           if (!d.isValid()) return null;
-          const op = dayjs(row['opened_date'], 'M/D/YYYY h:mm A');
+          const op = dayjs(row['opened_date'], 'M/D/YYYY');
           const dateStr = d.format('YYYY-MM-DD');
           return {
             caseClosedBy:   row['case_closed_by'] ?? null,
