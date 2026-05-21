@@ -254,12 +254,12 @@ async function startServer() {
       if (userList.length > 0) {
         const placeholders = userList.map((_: any, i: number) => `$${i + 1}`).join(',');
         const r = await pool.query(
-          `SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados" WHERE "case_closed_by" IN (${placeholders})`,
+          `SELECT "case_closed_by", "closed_date", "opened_date", "contact_reason_1" FROM "Cerrados" WHERE "case_closed_by" IN (${placeholders})`,
           userList,
         );
         rows = r.rows;
       } else {
-        const r = await pool.query('SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados"');
+        const r = await pool.query('SELECT "case_closed_by", "closed_date", "opened_date", "contact_reason_1" FROM "Cerrados"');
         rows = r.rows;
       }
 
@@ -268,7 +268,7 @@ async function startServer() {
 
       const out = rows
         .map((row: any) => {
-          const d = dayjs(row['datetime_closed'], 'M/D/YYYY h:mm A');
+          const d = dayjs(row['closed_date'], 'M/D/YYYY h:mm A');
           if (!d.isValid()) return null;
           const op = dayjs(row['opened_date'], 'M/D/YYYY h:mm A');
           const dateStr = d.format('YYYY-MM-DD');

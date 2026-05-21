@@ -674,12 +674,12 @@ app.get('/api/closed-cases', async (req, res) => {
     if (userList.length > 0) {
       const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
       const r = await pool.query(
-        `SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados" WHERE "case_closed_by" IN (${placeholders})`,
+        `SELECT "case_closed_by", "closed_date", "opened_date", "contact_reason_1" FROM "Cerrados" WHERE "case_closed_by" IN (${placeholders})`,
         userList,
       );
       rows = r.rows;
     } else {
-      const r = await pool.query('SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados"');
+      const r = await pool.query('SELECT "case_closed_by", "closed_date", "opened_date", "contact_reason_1" FROM "Cerrados"');
       rows = r.rows;
     }
 
@@ -688,7 +688,7 @@ app.get('/api/closed-cases', async (req, res) => {
 
     const out = rows
       .map(row => {
-        const p = parseDateFlex(row['datetime_closed']);
+        const p = parseDateFlex(row['closed_date']);
         if (p === null) return null;
         const op = parseDateFlex(row['opened_date']);
         return {
