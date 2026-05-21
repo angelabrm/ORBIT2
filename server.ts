@@ -242,6 +242,58 @@ async function startServer() {
     }
   });
 
+  // Closed Cases: sourced from the Cerrados table.
+  // Join: Cerrados.case_closed_by ↔ Roster.Compass
+  app.get('/api/closed-cases', async (req, res) => {
+    if (!pool) return res.status(503).json({ error: 'Database connection not configured' });
+    try {
+      const { user, startDate, endDate } = req.query as { user?: string; startDate?: string; endDate?: string };
+      const userList = (user || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+
+      let rows: any[];
+      if (userList.length > 0) {
+        const placeholders = userList.map((_: any, i: number) => `$${i + 1}`).join(',');
+        const r = await pool.query(
+          `SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados" WHERE "case_closed_by" IN (${placeholders})`,
+          userList,
+        );
+        rows = r.rows;
+      } else {
+        const r = await pool.query('SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados"');
+        rows = r.rows;
+      }
+
+      const start = startDate ? dayjs(startDate as string) : null;
+      const end   = endDate   ? dayjs(endDate   as string) : null;
+
+      const out = rows
+        .map((row: any) => {
+          const d = dayjs(row['datetime_closed'], 'M/D/YYYY h:mm A');
+          if (!d.isValid()) return null;
+          const op = dayjs(row['opened_date'], 'M/D/YYYY h:mm A');
+          const dateStr = d.format('YYYY-MM-DD');
+          return {
+            caseClosedBy:   row['case_closed_by'] ?? null,
+            dateStr,
+            dateMs:         Date.UTC(d.year(), d.month(), d.date()),
+            openedDateStr:  op.isValid() ? op.format('YYYY-MM-DD') : null,
+            contactReason1: row['contact_reason_1'] ?? null,
+          };
+        })
+        .filter((r: any): r is NonNullable<typeof r> => r !== null)
+        .filter((r: any) => {
+          if (start && dayjs(r.dateStr).isBefore(start, 'day')) return false;
+          if (end   && dayjs(r.dateStr).isAfter(end,   'day')) return false;
+          return true;
+        });
+
+      res.json(out);
+    } catch (error) {
+      console.error('[closed-cases] error:', error);
+      res.status(500).json({ error: 'Failed to fetch closed cases' });
+    }
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ 

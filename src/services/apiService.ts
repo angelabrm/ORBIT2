@@ -123,6 +123,34 @@ export const fetchStillOpenCases = async (startDate?: any, endDate?: any): Promi
   }
 };
 
+export interface ClosedCaseRow {
+  caseClosedBy: string;
+  dateStr: string;        // "YYYY-MM-DD" from datetime_closed (TZ-safe bucketing key)
+  dateMs: number;
+  openedDateStr: string | null;  // "YYYY-MM-DD" from opened_date — used for FCR same-day check
+  contactReason1: string | null; // for Information / Complaint breakdown
+}
+
+export const fetchClosedCases = async (
+  compassIds?: string[],
+  startDate?: any,
+  endDate?: any,
+): Promise<ClosedCaseRow[]> => {
+  try {
+    const params = new URLSearchParams();
+    if (compassIds && compassIds.length > 0) params.append('user', compassIds.join(','));
+    if (startDate) params.append('startDate', dayjs(startDate).toISOString());
+    if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
+
+    const response = await fetch(`/api/closed-cases?${params.toString()}`);
+    if (!response.ok) throw new Error('Failed to fetch from API');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching closed cases:', error);
+    return [];
+  }
+};
+
 export const checkApiHealth = async () => {
   try {
     const response = await fetch('/api/health');

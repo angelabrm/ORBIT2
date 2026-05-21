@@ -20,7 +20,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
-import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow, fetchNSAT, NSATRow, fetchStillOpenCases, StillOpenRow } from '../../services/apiService';
+import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow, fetchNSAT, NSATRow, fetchStillOpenCases, StillOpenRow, fetchClosedCases, ClosedCaseRow } from '../../services/apiService';
 import { Tooltip as MuiTooltip, IconButton, Select, MenuItem, FormControl, InputLabel, Checkbox, ListItemText, ListSubheader, ToggleButton, ToggleButtonGroup, Button, Menu } from '@mui/material';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
@@ -619,6 +619,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Real NSAT rows from Neon, joined on this user/team's Compass IDs
   const [dbNSAT, setDbNSAT] = React.useState<NSATRow[] | null>(null);
 
+  // Real closed cases from Cerrados (case_closed_by ↔ Compass)
+  const [dbClosedCases, setDbClosedCases] = React.useState<ClosedCaseRow[] | null>(null);
+
   // Still Open Cases — team-wide CAC indicator. Same number for everyone in CAC.
   const [dbStillOpen, setDbStillOpen] = React.useState<StillOpenRow[] | null>(null);
 
@@ -743,6 +746,15 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         setDbStillOpen(stillOpen);
       } else {
         setDbStillOpen(null);
+      }
+
+      // Closed Cases from Cerrados (case_closed_by ↔ Compass).
+      // Always fetched whenever we have compass IDs — not CAC-gated.
+      if (compassIds.length > 0) {
+        const closed = await fetchClosedCases(compassIds, startDate, endDate);
+        setDbClosedCases(closed);
+      } else {
+        setDbClosedCases(null);
       }
     };
     loadDbData();
@@ -899,7 +911,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const REASON_INFO      = 'Information & Assistance requests';
     const REASON_COMPLAINT = 'Complaint';
 
-    // Abiertos → Opened/Closed counts per bucket (+ Information / Complaint breakdown)
+    // Abiertos → Opened Cases counts per bucket (+ Information / Complaint breakdown).
+    // Closed Cases now come from the Cerrados table (see block below).
     if (dbCases) {
       dbCases.forEach(c => {
         const reason = c?.contact_reason_1 as string | null | undefined;
@@ -910,39 +923,44 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           if (reason === REASON_INFO)      ensure(k)['Opened Cases Information']++;
           if (reason === REASON_COMPLAINT) ensure(k)['Opened Cases Complaint']++;
         }
-        const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-        if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
-          const k = closed.format(formatStr);
-          ensure(k)['Closed Cases']++;
-          if (reason === REASON_INFO)      ensure(k)['Closed Cases Information']++;
-          if (reason === REASON_COMPLAINT) ensure(k)['Closed Cases Complaint']++;
-        }
-      });
-
-      Object.values(out).forEach(b => {
-        b['Closed Cases Rate'] = b['Opened Cases'] > 0
-          ? Number(((b['Closed Cases'] / b['Opened Cases']) * 100).toFixed(1))
-          : 0;
       });
     }
 
-    // % First Contact Resolution: of the cases CLOSED in this bucket, what
-    // fraction had datetime_opened on the same calendar day as datetime_closed.
-    //   numerator   = count of (opened-day == closed-day)
-    //   denominator = total cases closed in bucket
-    // Buckets with no closed cases stay out of fcrByBucket → null on the
-    // chart (avoids a misleading 0% on quiet days).
+    // Cerrados → Closed Cases counts per bucket (+ Information / Complaint breakdown).
+    // Join: case_closed_by ↔ Roster.Compass.  Date: datetime_closed (varchar M/D/YYYY h:mm A).
+    if (dbClosedCases) {
+      dbClosedCases.forEach(c => {
+        const d = dayjs(c.dateStr); // already YYYY-MM-DD from the backend
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = d.format(formatStr);
+        ensure(k)['Closed Cases']++;
+        if (c.contactReason1 === REASON_INFO)      ensure(k)['Closed Cases Information']++;
+        if (c.contactReason1 === REASON_COMPLAINT) ensure(k)['Closed Cases Complaint']++;
+      });
+    }
+
+    // Closed Cases Rate = Closed / Opened per bucket (computed after both loops).
+    Object.values(out).forEach(b => {
+      b['Closed Cases Rate'] = b['Opened Cases'] > 0
+        ? Number(((b['Closed Cases'] / b['Opened Cases']) * 100).toFixed(1))
+        : 0;
+    });
+
+    // % First Contact Resolution: of cases in Cerrados closed in this bucket,
+    // what fraction has opened_date on the same calendar day as datetime_closed.
+    //   numerator   = count where openedDateStr === dateStr
+    //   denominator = total closed in bucket
+    // Buckets with no closed cases stay out of fcrByBucket → null on chart.
     const fcrByBucket: Record<string, number> = {};
-    if (dbCases) {
+    if (dbClosedCases) {
       const acc: Record<string, { sameDay: number; total: number }> = {};
-      dbCases.forEach(c => {
-        const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-        if (!closed || !closed.isValid() || !closed.isBetween(startDate, endDate, 'day', '[]')) return;
-        const k = closed.format(formatStr);
+      dbClosedCases.forEach(c => {
+        const d = dayjs(c.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = d.format(formatStr);
         if (!acc[k]) acc[k] = { sameDay: 0, total: 0 };
         acc[k].total++;
-        const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
-        if (opened && opened.isValid() && opened.isSame(closed, 'day')) acc[k].sameDay++;
+        if (c.openedDateStr && c.openedDateStr === c.dateStr) acc[k].sameDay++;
       });
       Object.entries(acc).forEach(([k, { sameDay, total }]) => {
         if (total > 0) fcrByBucket[k] = Number(((sameDay / total) * 100).toFixed(1));
@@ -1091,7 +1109,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     }
 
     return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket };
-  }, [dbCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate]);
+  }, [dbCases, dbClosedCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
@@ -1376,37 +1394,45 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const FMT = 'M/D/YYYY h:mm A';
     const result: Record<string, number> = {};
 
-    if ((currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases') && dbCases) {
-      const field = currentIndicator === 'Opened Cases' ? 'datetime_opened' : 'datetime_closed';
+    if (currentIndicator === 'Opened Cases' && dbCases) {
       dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
-        const d = c?.[field] ? dayjs(c[field], FMT) : null;
+        const d = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
         if (d && d.isValid() && d.isBetween(startDate, endDate, 'day', '[]')) {
           const k = d.format(formatStr);
           result[k] = (result[k] || 0) + 1;
         }
       });
-    } else if (currentIndicator === 'Closed Cases Rate' && dbCases) {
+    } else if (currentIndicator === 'Closed Cases' && dbClosedCases) {
+      dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+        const d = dayjs(c.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        result[d.format(formatStr)] = (result[d.format(formatStr)] || 0) + 1;
+      });
+    } else if (currentIndicator === 'Closed Cases Rate' && dbCases && dbClosedCases) {
       const op: Record<string, number> = {};
       const cl: Record<string, number> = {};
       dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
-        const o  = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
-        const cd = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-        if (o  && o.isValid()  && o.isBetween(startDate, endDate, 'day', '[]'))  op[o.format(formatStr)]  = (op[o.format(formatStr)]  || 0) + 1;
-        if (cd && cd.isValid() && cd.isBetween(startDate, endDate, 'day', '[]')) cl[cd.format(formatStr)] = (cl[cd.format(formatStr)] || 0) + 1;
+        const o = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+        if (o && o.isValid() && o.isBetween(startDate, endDate, 'day', '[]'))
+          op[o.format(formatStr)] = (op[o.format(formatStr)] || 0) + 1;
+      });
+      dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+        const d = dayjs(c.dateStr);
+        if (d.isValid() && d.isBetween(startDate, endDate, 'day', '[]'))
+          cl[d.format(formatStr)] = (cl[d.format(formatStr)] || 0) + 1;
       });
       Array.from(new Set([...Object.keys(op), ...Object.keys(cl)])).forEach(k => {
         result[k] = op[k] > 0 ? Number(((cl[k] || 0) / op[k] * 100).toFixed(1)) : 0;
       });
-    } else if (currentIndicator === '% First Contact Resolution' && dbCases) {
+    } else if (currentIndicator === '% First Contact Resolution' && dbClosedCases) {
       const acc: Record<string, { sameDay: number; total: number }> = {};
-      dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
-        const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-        if (!closed || !closed.isValid() || !closed.isBetween(startDate, endDate, 'day', '[]')) return;
-        const k = closed.format(formatStr);
+      dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+        const d = dayjs(c.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        const k = d.format(formatStr);
         if (!acc[k]) acc[k] = { sameDay: 0, total: 0 };
         acc[k].total++;
-        const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
-        if (opened && opened.isValid() && opened.isSame(closed, 'day')) acc[k].sameDay++;
+        if (c.openedDateStr && c.openedDateStr === c.dateStr) acc[k].sameDay++;
       });
       Object.entries(acc).forEach(([k, { sameDay, total }]) => {
         if (total > 0) result[k] = Number(((sameDay / total) * 100).toFixed(1));
@@ -1460,7 +1486,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     }
 
     return result;
-  }, [selectedTeamMember, isManagement, currentIndicator, users, dbCases, dbActivity, dbNSAT, dbQA, hierarchy, startDate, endDate, DB_INDICATORS]);
+  }, [selectedTeamMember, isManagement, currentIndicator, users, dbCases, dbClosedCases, dbActivity, dbNSAT, dbQA, hierarchy, startDate, endDate, DB_INDICATORS]);
 
   const aggregatedTrendData = React.useMemo(() => {
     if (!isManagement) return [];
@@ -1505,7 +1531,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       }> = {};
       const REASON_INFO2      = 'Information & Assistance requests';
       const REASON_COMPLAINT2 = 'Complaint';
-      if (memberCompass && dbCases && (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases')) {
+      if (memberCompass && currentIndicator === 'Opened Cases' && dbCases) {
         dbCases.filter(c => c.case_owner === memberCompass).forEach(c => {
           const reason = c?.contact_reason_1 as string | null | undefined;
           const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT2) : null;
@@ -1515,13 +1541,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
             if (reason === REASON_INFO2)      memberBreakdown[k]['Opened Cases Information']++;
             if (reason === REASON_COMPLAINT2) memberBreakdown[k]['Opened Cases Complaint']++;
           }
-          const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT2) : null;
-          if (closed && closed.isValid() && closed.isBetween(startDate, endDate, 'day', '[]')) {
-            const k = closed.format(formatStr);
-            if (!memberBreakdown[k]) memberBreakdown[k] = { 'Opened Cases Information': 0, 'Opened Cases Complaint': 0, 'Closed Cases Information': 0, 'Closed Cases Complaint': 0 };
-            if (reason === REASON_INFO2)      memberBreakdown[k]['Closed Cases Information']++;
-            if (reason === REASON_COMPLAINT2) memberBreakdown[k]['Closed Cases Complaint']++;
-          }
+        });
+      }
+      if (memberCompass && currentIndicator === 'Closed Cases' && dbClosedCases) {
+        dbClosedCases.filter(c => c.caseClosedBy === memberCompass).forEach(c => {
+          const d = dayjs(c.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          const k = d.format(formatStr);
+          if (!memberBreakdown[k]) memberBreakdown[k] = { 'Opened Cases Information': 0, 'Opened Cases Complaint': 0, 'Closed Cases Information': 0, 'Closed Cases Complaint': 0 };
+          if (c.contactReason1 === REASON_INFO2)      memberBreakdown[k]['Closed Cases Information']++;
+          if (c.contactReason1 === REASON_COMPLAINT2) memberBreakdown[k]['Closed Cases Complaint']++;
         });
       }
 
@@ -1582,7 +1611,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       }
       return entry;
     }).sort((a,b) => a.name.localeCompare(b.name));
-  }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember, DB_INDICATORS, dbTrendByBucket, memberBuckets]);
+  }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember, DB_INDICATORS, dbTrendByBucket, memberBuckets, dbCases, dbClosedCases, users]);
 
   const dataKeyManagement = indicatorMap[currentIndicator];
 
@@ -1605,30 +1634,36 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       if (!m) return;
       let val = 0;
 
-      if ((currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases') && dbCases && m.compass) {
-        const field = currentIndicator === 'Opened Cases' ? 'datetime_opened' : 'datetime_closed';
+      if (currentIndicator === 'Opened Cases' && dbCases && m.compass) {
         val = dbCases.filter(c => {
           if (c.case_owner !== m.compass) return false;
-          const d = c?.[field] ? dayjs(c[field], FMT) : null;
+          const d = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
           return d && d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
         }).length;
-      } else if (currentIndicator === 'Closed Cases Rate' && dbCases && m.compass) {
+      } else if (currentIndicator === 'Closed Cases' && dbClosedCases && m.compass) {
+        val = dbClosedCases.filter(c => {
+          if (c.caseClosedBy !== m.compass) return false;
+          const d = dayjs(c.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }).length;
+      } else if (currentIndicator === 'Closed Cases Rate' && dbCases && dbClosedCases && m.compass) {
         let op = 0, cl = 0;
         dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
-          const o  = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
-          const cd = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-          if (o  && o.isValid()  && o.isBetween(startDate, endDate, 'day', '[]'))  op++;
-          if (cd && cd.isValid() && cd.isBetween(startDate, endDate, 'day', '[]')) cl++;
+          const o = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
+          if (o && o.isValid() && o.isBetween(startDate, endDate, 'day', '[]')) op++;
+        });
+        dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+          const d = dayjs(c.dateStr);
+          if (d.isValid() && d.isBetween(startDate, endDate, 'day', '[]')) cl++;
         });
         val = op > 0 ? Number(((cl / op) * 100).toFixed(1)) : 0;
-      } else if (currentIndicator === '% First Contact Resolution' && dbCases && m.compass) {
+      } else if (currentIndicator === '% First Contact Resolution' && dbClosedCases && m.compass) {
         let sameDay = 0, total = 0;
-        dbCases.filter(c => c.case_owner === m.compass).forEach(c => {
-          const closed = c?.datetime_closed ? dayjs(c.datetime_closed, FMT) : null;
-          if (!closed || !closed.isValid() || !closed.isBetween(startDate, endDate, 'day', '[]')) return;
+        dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+          const d = dayjs(c.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
           total++;
-          const opened = c?.datetime_opened ? dayjs(c.datetime_opened, FMT) : null;
-          if (opened && opened.isValid() && opened.isSame(closed, 'day')) sameDay++;
+          if (c.openedDateStr && c.openedDateStr === c.dateStr) sameDay++;
         });
         val = total > 0 ? Number(((sameDay / total) * 100).toFixed(1)) : 0;
       } else if (currentIndicator === 'Incoming Calls' && dbActivity) {
@@ -1674,7 +1709,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       result[rfc] = val;
     });
     return result;
-  }, [isManagement, currentIndicator, teamRfcs, users, dbCases, dbActivity, dbNSAT, dbQA, startDate, endDate, DB_INDICATORS]);
+  }, [isManagement, currentIndicator, teamRfcs, users, dbCases, dbClosedCases, dbActivity, dbNSAT, dbQA, startDate, endDate, DB_INDICATORS]);
 
   const sortedTeam = React.useMemo(() => {
     // Each entry gets a uniform `_rankValue` so the rest of the pipeline

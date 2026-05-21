@@ -210,21 +210,14 @@ app.get('/api/opened-cases', async (req, res) => {
     if (startDate || endDate) {
       const start = startDate ? Date.parse(startDate) : null;
       const end   = endDate   ? Date.parse(endDate)   : null;
-      // Include a row if EITHER datetime_opened OR datetime_closed falls in
-      // the range. This way Closed Cases / FCR bucketing (which bucket by
-      // datetime_closed) still sees cases that opened earlier and closed
-      // within the window — without that, the denominator was undercounted
-      // and FCR % was artificially high.
-      const inRange = (t: number | null) => {
+      // Filter by datetime_opened only — Closed Cases are now sourced from
+      // the Cerrados table via /api/closed-cases.
+      rows = rows.filter(row => {
+        const t = parseOpenedAt(row.datetime_opened);
         if (t === null) return false;
-        if (start !== null && t < start - 86400000) return false; // day-inclusive
+        if (start !== null && t < start - 86400000) return false; // ±1 day TZ tolerance
         if (end   !== null && t > end   + 86400000) return false;
         return true;
-      };
-      rows = rows.filter(row => {
-        const tOpened = parseOpenedAt(row.datetime_opened);
-        const tClosed = row.datetime_closed ? parseOpenedAt(row.datetime_closed) : null;
-        return inRange(tOpened) || inRange(tClosed);
       });
     }
 
@@ -662,6 +655,61 @@ app.get('/api/still-open-cases', async (req, res) => {
   } catch (error: any) {
     console.error('[still-open-cases] error:', error?.message);
     res.status(500).json({ error: 'Failed to fetch Still Open Cases', detail: error?.message });
+  }
+});
+
+// Closed Cases: sourced from the Cerrados table.
+// Join: Cerrados.case_closed_by ↔ Roster.Compass  (param: ?user=CSV of Compass IDs)
+// Date column: Cerrados.datetime_closed (varchar M/D/YYYY h:mm A)
+// Also returns opened_date (for FCR same-day check) and contact_reason_1 (for breakdown).
+app.get('/api/closed-cases', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+
+    const { user, startDate, endDate } = req.query as { user?: string; startDate?: string; endDate?: string };
+    const userList = (user || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    let rows: any[];
+    if (userList.length > 0) {
+      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
+      const r = await pool.query(
+        `SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados" WHERE "case_closed_by" IN (${placeholders})`,
+        userList,
+      );
+      rows = r.rows;
+    } else {
+      const r = await pool.query('SELECT "case_closed_by", "datetime_closed", "opened_date", "contact_reason_1" FROM "Cerrados"');
+      rows = r.rows;
+    }
+
+    const start = startDate ? Date.parse(startDate) : null;
+    const end   = endDate   ? Date.parse(endDate)   : null;
+
+    const out = rows
+      .map(row => {
+        const p = parseDateFlex(row['datetime_closed']);
+        if (p === null) return null;
+        const op = parseDateFlex(row['opened_date']);
+        return {
+          caseClosedBy:   row['case_closed_by'] ?? null,
+          dateStr:        p.dateStr,
+          dateMs:         p.dateMs,
+          openedDateStr:  op?.dateStr ?? null,
+          contactReason1: row['contact_reason_1'] ?? null,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .filter(r => {
+        if (start !== null && r.dateMs < start - 86400000) return false;
+        if (end   !== null && r.dateMs > end   + 86400000) return false;
+        return true;
+      });
+
+    res.json(out);
+  } catch (error: any) {
+    console.error('[closed-cases] error:', error?.message);
+    res.status(500).json({ error: 'Failed to fetch closed cases', detail: error?.message });
   }
 });
 
