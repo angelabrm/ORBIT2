@@ -1210,6 +1210,59 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [rawHistoricalData, startDate, endDate, hierarchy, selectedIndicators, dbTrendByBucket, DB_INDICATORS]);
 
+  // Summary stat shown in the line chart header (one badge per selected indicator).
+  //   COUNT  — Opened/Closed Cases, Incoming Calls → SUM of trendData values
+  //   NSAT   — NSAT / NSAT Information / NSAT Claims → NPS index over ALL rows in range
+  //   AVG    — everything else → average of non-null trendData bucket values
+  const indicatorSummary = React.useMemo(() => {
+    const COUNT_SET = new Set(['Opened Cases', 'Closed Cases', 'Incoming Calls']);
+    const NSAT_SET  = new Set(['NSAT', 'NSAT Information', 'NSAT Claims']);
+    const PCT_SET   = new Set(['QA', 'Backlog', '% First Contact Resolution', 'Closed Cases Rate',
+                                'Performance', 'Productivity', 'Bonus']);
+
+    return selectedIndicators.map(indicator => {
+      if (COUNT_SET.has(indicator)) {
+        const sum = trendData.reduce((acc, pt) => {
+          const v = pt[indicator];
+          return acc + (typeof v === 'number' ? v : 0);
+        }, 0);
+        return { indicator, value: sum, decimals: 0, suffix: '' };
+      }
+
+      if (NSAT_SET.has(indicator)) {
+        const reasonFilter =
+          indicator === 'NSAT Information' ? 'Information & Assistance requests' :
+          indicator === 'NSAT Claims'      ? 'Complaint' : null;
+        const rows = (dbNSAT || []).filter(n => {
+          const d = dayjs(n.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return false;
+          return reasonFilter === null || n.contactReason1 === reasonFilter;
+        });
+        if (rows.length === 0) return { indicator, value: null, decimals: 0, suffix: '' };
+        type Q = { p: number; d: number; t: number };
+        const qs: [Q, Q, Q] = [{ p:0,d:0,t:0 }, { p:0,d:0,t:0 }, { p:0,d:0,t:0 }];
+        rows.forEach(n => {
+          [n.q1, n.q2, n.q3].forEach((v, i) => {
+            if (v == null || !Number.isFinite(v)) return;
+            qs[i].t++;
+            if (v >= 9) qs[i].p++;
+            else if (v <= 6) qs[i].d++;
+          });
+        });
+        if (qs.every(q => q.t === 0)) return { indicator, value: null, decimals: 0, suffix: '' };
+        const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
+        return { indicator, value: Math.round((perQ[0] + perQ[1] + perQ[2]) / 3), decimals: 0, suffix: '' };
+      }
+
+      // Average of non-null bucket values
+      const vals = trendData.map(pt => pt[indicator]).filter((v): v is number => typeof v === 'number');
+      if (vals.length === 0) return { indicator, value: null, decimals: 1, suffix: '' };
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const suffix = PCT_SET.has(indicator) || indicator.startsWith('%') ? '%' : '';
+      return { indicator, value: avg, decimals: 1, suffix };
+    });
+  }, [selectedIndicators, trendData, dbNSAT, startDate, endDate]);
+
   // Administrative Management Logic
   const allDays = React.useMemo(() => {
     const days = [];
@@ -2214,6 +2267,32 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     <MenuItem onClick={() => handleHierarchyClose('month')}>MONTHS</MenuItem>
                     <MenuItem onClick={() => handleHierarchyClose('year')}>YEARS</MenuItem>
                   </Menu>
+                  {indicatorSummary.filter(s => s.value !== null).map((s, idx) => {
+                    const color = idx === 0 ? '#0ba0af' : '#B018D9';
+                    const label = s.value !== null
+                      ? (s.decimals === 0
+                          ? `${Math.round(s.value as number)}${s.suffix}`
+                          : `${(s.value as number).toFixed(s.decimals)}${s.suffix}`)
+                      : '—';
+                    return (
+                      <Box
+                        key={s.indicator}
+                        sx={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-end',
+                          mt: 0.5,
+                        }}
+                      >
+                        <Typography sx={{ fontSize: 9, fontWeight: 700, opacity: 0.45, letterSpacing: 0.8, textTransform: 'uppercase', lineHeight: 1.2 }}>
+                          {s.indicator}
+                        </Typography>
+                        <Typography sx={{ fontSize: 18, fontWeight: 900, color, fontFamily: 'monospace', lineHeight: 1.1 }}>
+                          {label}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Box>
 
