@@ -162,7 +162,8 @@ El estado global (usuario autenticado, miembro seleccionado, pestaña activa, ra
 | Endpoint | Función |
 |----------|---------|
 | `GET /api/health` | Verifica conectividad con la base de datos |
-| `GET /api/opened-cases` | Consulta casos abiertos desde PostgreSQL, con filtrado por `case_owner` y rango de fechas |
+| `GET /api/opened-cases` | `Abiertos` — filtrado por `case_owner` (Compass ID) y `datetime_opened` |
+| `GET /api/closed-cases` | `Cerrados` — filtrado por `case_closed_by` (Compass ID) y `closed_date` (`M/D/YYYY` varchar) |
 
 ### Base de datos
 
@@ -197,6 +198,7 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 - Despliegue en Vercel con `api/index.ts` como serverless function en `orbit-2-weld.vercel.app`. `engines.node` pineado a `22.x`, `@neondatabase/serverless` eliminado del path de cold start, `pg` y `dayjs` cargados lazy desde dentro de los handlers
 - Rango de fechas default del dashboard: **desde el inicio del mes anterior hasta el fin del mes actual** (`dayjs().subtract(1, 'month').startOf('month')` → `dayjs().endOf('month')`). Para indicadores que requieren contexto histórico mayor (Backlog → 3 meses prior), el fetch correspondiente extiende su propio rango sin afectar la ventana visible
 - **Tooltip con desglose de Opened/Closed Cases**: cuando el indicador activo es `Opened Cases` o `Closed Cases`, el tooltip del line chart muestra tres filas: total + `↳ Information` + `↳ Complaint` (filtradas por `contact_reason_1`). Funciona en todas las vistas (Agent, Leader, Manager, Executive). En management muestra el desglose independiente para Team Average y Member Individual
+- **Indicador de resumen en header del gráfico**: badges en la esquina superior derecha del Paper del line chart (junto al selector de jerarquía temporal). Un badge por indicador seleccionado: COUNT (`Opened Cases`, `Closed Cases`, `Incoming Calls`) → suma del periodo; NSAT/NSAT Information/NSAT Claims → NPS index del periodo completo (misma fórmula que el chart pero sobre todos los registros del rango); demás indicadores → promedio de los valores de bucket. Badge oculto si no hay datos. Primer indicador en cian `#0ba0af`, segundo en morado `#B018D9`
 - Aislamiento de sesión al cerrar
 
 ### Pendiente de implementar
@@ -366,8 +368,8 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 | Indicador | Tabla(s) fuente | Join | Agregación por bucket | Display |
 |---|---|---|---|---|
 | `Opened Cases` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | COUNT de filas con `datetime_opened` en el bucket | entero |
-| `Closed Cases` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | COUNT de filas con `datetime_closed` en el bucket | entero |
-| `Closed Cases Rate` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | (Closed/Opened) × 100 por bucket | decimal |
+| `Closed Cases` | `Cerrados` | `case_closed_by` ↔ `Roster.Compass` | COUNT de filas con `closed_date` en el bucket (`M/D/YYYY` varchar) | entero |
+| `Closed Cases Rate` | `Abiertos` + `Cerrados` | mismo join por Compass | (Closed/Opened) × 100 por bucket | decimal |
 | `Incoming Calls` | `Actividad` + `Rendimiento_Agente` (sumadas) | Actividad: `User` ↔ `Roster.CallPicker` (fecha en `Source.Name = Actividad_YYYY_MM_DD.csv`, valor en `Answered Calls`). Rendimiento_Agente: `nombre_del_agente` ↔ `Roster.Genesys` (fecha en `inicio_del_intervalo`, valor en `contestadas` lowercase) | SUM de ambos valores por bucket | entero |
 | `QA` | `QA` + `QA_Premium` (merged) | `Agente` (QA) o `Agent` (QA_Premium) ↔ `Roster.QA` | AVG de score por fila. Score = suma ponderada de 10 criterios (5 × 16 pts soft skills + 5 × 4 pts process) con penalty all-or-nothing por `Error Crítico`/`Critical Error`. Premium: textos en inglés, "NA" cuenta como crédito completo en criterios. Buckets sin evaluaciones → gap conectado | porcentaje `92.8%` |
 | `NSAT` | `NSAT` + `NSAT_Premium` (merged) | NSAT: `case_owner` ↔ `Roster.Compass`. NSAT_Premium: `agent_full_name` ↔ `Roster.Compass` (mismas columnas Q1/Q2/Q3, misma escala 1–10) | NPS-style Index: por cada Q (Q1=`agent_satisfaction_score`, Q2=`effort_score`, Q3=`overall_satisfaction_score`), `((promotores − detractores) / total) × 100`. Promotores = 9–10, detractores = 1–6, pasivos = 7–8. Index = promedio de las 3 Qs. Buckets sin respuestas → gap conectado | entero `[-100, +100]` (sin `%`) |
@@ -375,7 +377,7 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 | `NSAT Claims` | `NSAT` + `NSAT_Premium` | Mismo join que NSAT, filtrado a `contact_reason_1 = "Complaint"` | Misma fórmula NPS que NSAT pero sobre el subconjunto filtrado | entero `[-100, +100]` |
 | `Still Open Cases` ⚙️ team-wide CAC | `Aun_Abiertos` | sin join — la tabla entera es CAC por construcción | Daily count primero, luego **snapshot del último día con data en el bucket** (no SUM; es backlog, no flujo). Para hierarchy `day` colapsa al count diario. Bucketing visible solo cuando `scopeIsCAC` | entero |
 | `Backlog` ⚙️ team-wide CAC | `Aun_Abiertos` + `Abiertos` (no filtrado por usuario) | sin join — combinación de Still Open snapshot y monthly totales de Opened Cases del equipo entero | `(Still Open Cases en el último día del bucket) / (avg de Opened Cases en los 3 meses cuyo último día es estrictamente anterior al snapshot)`. Si los 3 priors suman 0 → bucket ausente → gap conectado. El fetch de Opened Cases para Backlog extiende `startDate − 3 meses` para garantizar que los meses prior siempre estén disponibles aunque el rango visible sea estrecho | entero `%` |
-| `% First Contact Resolution` | `Abiertos` | `case_owner` ↔ `Roster.Compass` | De los casos cerrados en el bucket, % cuyo `datetime_closed` cae el mismo día que `datetime_opened`. Buckets sin closed cases → bucket ausente → gap conectado | decimal `%` |
+| `% First Contact Resolution` | `Cerrados` | `case_closed_by` ↔ `Roster.Compass` | De los casos cerrados en el bucket, % cuyo `openedDateStr === dateStr` (ambos `YYYY-MM-DD`). Buckets sin closed cases → bucket ausente → gap conectado | decimal `%` |
 
 ### Indicadores aún en mock (por migrar)
 
@@ -396,7 +398,7 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 
 **Bucketing por indicador**:
 - `dbTrendByBucket` retorna `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket }`:
-  - `out` — buckets con valores tipo COUNT/SUM/SNAPSHOT (0 es legítimo). Incluye `Opened Cases`, `Closed Cases`, `Incoming Calls`, `Still Open Cases` y cuatro contadores de desglose: `Opened Cases Information`, `Opened Cases Complaint`, `Closed Cases Information`, `Closed Cases Complaint` (filtrados por `contact_reason_1` de `Abiertos`).
+  - `out` — buckets con valores tipo COUNT/SUM/SNAPSHOT (0 es legítimo). Incluye `Opened Cases` (de `Abiertos`), `Closed Cases` (de `Cerrados`), `Incoming Calls`, `Still Open Cases` y cuatro contadores de desglose: `Opened Cases Information`, `Opened Cases Complaint` (filtrados por `contact_reason_1` de `Abiertos`), `Closed Cases Information`, `Closed Cases Complaint` (filtrados por `contact_reason_1` de `Cerrados`).
   - Los `xxxByBucket` — buckets con valores tipo AVG / INDEX / RATIO (bucket ausente = sin datos → null en el chart, **gap visible con línea conectada**).
 - `<Line connectNulls={...}>` activado para QA, NSAT, NSAT Information, NSAT Claims, Backlog y % FCR (los que pueden tener buckets ausentes).
 - `LabelList` formatea por indicador: `% suffix` para QA y Backlog; entero raw `[-100..+100]` para NSAT y slices; defaults para counts.

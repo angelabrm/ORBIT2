@@ -45,7 +45,8 @@ React 19 + Vite frontend, Express 4 backend. Two parallel entry points — keep 
 | `GET /api/health` | DB check |
 | `GET /api/roster` | Google Sheets users, 5-min cache; exposes `compass`, `callPicker`, `qa`, `genesys` join keys |
 | `POST /api/login` | RFC lookup |
-| `GET /api/opened-cases` | `Abiertos` — rows where `datetime_opened` **or** `datetime_closed` falls in range |
+| `GET /api/opened-cases` | `Abiertos` — rows where `datetime_opened` falls in range |
+| `GET /api/closed-cases` | `Cerrados` — join `case_closed_by ↔ Roster.Compass`; date from `closed_date` (`M/D/YYYY` varchar) |
 | `GET /api/incoming-calls` | `Actividad` + `Rendimiento_Agente` merged |
 | `GET /api/qa` | `QA` + `QA_Premium` merged |
 | `GET /api/nsat` | `NSAT` + `NSAT_Premium` merged; ships Q1/Q2/Q3 |
@@ -101,10 +102,12 @@ See **PRD §11** for formulas, join keys, display format, and pending indicators
 Key wiring points in `AgentView.tsx`:
 - `DB_INDICATORS` Set — add an indicator name here to promote it from mock to Neon.
 - `dbTrendByBucket` — returns `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket }`:
-  - `out` — count/sum/snapshot values (`0` is valid). Includes `Opened Cases`, `Closed Cases`, `Incoming Calls`, `Still Open Cases`, plus four breakdown counts: `Opened Cases Information`, `Opened Cases Complaint`, `Closed Cases Information`, `Closed Cases Complaint` (filtered by `contact_reason_1`).
+  - `out` — count/sum/snapshot values (`0` is valid). Includes `Opened Cases` (from `Abiertos`), `Closed Cases` (from `Cerrados`), `Incoming Calls`, `Still Open Cases`, plus four breakdown counts: `Opened Cases Information`, `Opened Cases Complaint`, `Closed Cases Information`, `Closed Cases Complaint` (filtered by `contact_reason_1`).
   - `xxxByBucket` — avg/index/ratio values; missing bucket → `null` → gap rendered with `connectNulls={true}`.
 - `scopeIsCAC` — gates CAC-only fetches (`Still Open Cases`, `Backlog`).
 - `memberBuckets` / `memberValuesForRanking` — per-member recomputation for the management ranking line and sort order.
 - Team + Member lines share **one Y axis** — do not reintroduce a right axis.
 
-When adding a new indicator, touch: `indicatorOptions`, `CasesTooltip` (if it needs breakdown rows), `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`.
+When adding a new indicator, touch: `indicatorOptions`, `CasesTooltip` (if it needs breakdown rows), `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`, and `indicatorSummary` (COUNT_SET / NSAT_SET / PCT_SET classification).
+
+- **`indicatorSummary`** — useMemo that produces per-indicator period totals shown as badges in the chart header (upper-right, next to hierarchy button). COUNT indicators sum; NSAT/NSAT Information/NSAT Claims compute a full-period NPS index from `dbNSAT`; everything else averages bucket values. `null` → badge hidden.
