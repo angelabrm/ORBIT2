@@ -21,6 +21,7 @@ interface RosterUser {
   callPicker?: string;
   qa?: string;
   genesys?: string;
+  subNivel?: string;
   name: string;
   role: string;
   client: string;
@@ -92,6 +93,7 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
   const callPickerCol = col('CallPicker');
   const qaCol         = col('QA');
   const genesysCol    = col('Genesys');
+  const subNivelCol   = col('SubNivel');
   const nombreCol     = col('Nombre');
   const nivelCol      = col('Nivel');
   const mesaCol       = col('MESA_');
@@ -108,13 +110,14 @@ async function fetchRosterFromSheets(): Promise<RosterUser[]> {
       const callPicker = callPickerCol >= 0 ? (row[callPickerCol]?.trim() || undefined) : undefined;
       const qa         = qaCol         >= 0 ? (row[qaCol]?.trim()         || undefined) : undefined;
       const genesys    = genesysCol    >= 0 ? (row[genesysCol]?.trim()    || undefined) : undefined;
+      const subNivel   = subNivelCol   >= 0 ? (row[subNivelCol]?.trim()   || undefined) : undefined;
       const nombre = row[nombreCol]?.trim() || '';
       const nivel = row[nivelCol]?.trim() || '';
       const mesa = row[mesaCol]?.trim() || '';
       const clientVal = row[clientCol]?.trim() || '';
       const role = mapRole(nivel);
       if (!role || !rfc) return null;
-      return { rfc, compass, callPicker, qa, genesys, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
+      return { rfc, compass, callPicker, qa, genesys, subNivel, name: nombre, role, client: clientVal, serviceDesk: mapServiceDesk(mesa) };
     })
     .filter(Boolean) as RosterUser[];
 

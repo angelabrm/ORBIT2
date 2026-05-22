@@ -11,6 +11,7 @@ export interface User {
   callPicker?: string;  // Matches Actividad."User" (Incoming calls)
   qa?: string;          // Matches QA."Agente" / QA_Premium."Agent" (QA records)
   genesys?: string;     // Matches Rendimiento_Agente."nombre_del_agente" (extra Incoming Calls source)
+  subNivel?: string;    // "Calls" | "Follow up" | "NA" — gates Productivity formula
   name: string;
   role: Role;
   client: "Stellantis" | "Pepsico";

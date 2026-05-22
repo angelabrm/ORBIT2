@@ -577,6 +577,35 @@ const CasesTooltip: React.FC<{
                 </div>
               </>
             )}
+            {/* Productivity formula breakdown */}
+            {((isManagement ? currentIndicator === 'Productivity' : name === 'Productivity')) && (() => {
+              const sn  = isMember ? pt['_mProdSubNivel'] : pt['_prodSubNivel'];
+              const ce  = isMember ? pt['_mProdCallsEff'] : pt['_prodCallsEff'];
+              const cse = isMember ? pt['_mProdCasesEff'] : pt['_prodCasesEff'];
+              const qn  = isMember ? pt['_mProdQaNorm']   : pt['_prodQaNorm'];
+              if (sn !== 'Calls' && sn !== 'Follow up') return null;
+              const fmt1 = (v: number | null) => v != null ? `${v.toFixed(1)}%` : '—';
+              return (
+                <>
+                  {sn === 'Calls' && (
+                    <div style={subRowStyle}>
+                      <span>↳ Calls Efficiency</span>
+                      <span style={valStyle}>{fmt1(ce)}</span>
+                    </div>
+                  )}
+                  {sn === 'Follow up' && (
+                    <div style={subRowStyle}>
+                      <span>↳ Cases Efficiency</span>
+                      <span style={valStyle}>{fmt1(cse)}</span>
+                    </div>
+                  )}
+                  <div style={subRowStyle}>
+                    <span>↳ QA (norm.)</span>
+                    <span style={valStyle}>{fmt1(qn)}</span>
+                  </div>
+                </>
+              );
+            })()}
           </React.Fragment>
         );
       })}
@@ -927,7 +956,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     }
 
     // Cerrados → Closed Cases counts per bucket (+ Information / Complaint breakdown).
-    // Join: case_closed_by ↔ Roster.Compass.  Date: datetime_closed (varchar M/D/YYYY h:mm A).
+    // Join: case_closed_by ↔ Roster.Compass.  Date: closed_date (varchar M/D/YYYY).
+    const nonFcrClosedByBucket: Record<string, number> = {};
     if (dbClosedCases) {
       dbClosedCases.forEach(c => {
         const d = dayjs(c.dateStr); // already YYYY-MM-DD from the backend
@@ -936,6 +966,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         ensure(k)['Closed Cases']++;
         if (c.contactReason1 === REASON_INFO)      ensure(k)['Closed Cases Information']++;
         if (c.contactReason1 === REASON_COMPLAINT) ensure(k)['Closed Cases Complaint']++;
+        // Track non-FCR closed cases (not same-day) for Productivity Follow-up formula
+        if (!c.openedDateStr || c.openedDateStr !== c.dateStr) {
+          nonFcrClosedByBucket[k] = (nonFcrClosedByBucket[k] || 0) + 1;
+        }
       });
     }
 
@@ -1108,8 +1142,38 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket };
-  }, [dbCases, dbClosedCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate]);
+    // Productivity per bucket — only for agents with a non-NA subNivel.
+    // Formula depends on subNivel:
+    //   Calls:     (CallsEfficiency × 0.5) + (QA_norm × 0.5)
+    //   Follow up: (CasesEfficiency × 0.5) + (QA_norm × 0.5)
+    // QA_norm = min(100, QA/80 × 100). Buckets without QA data → skipped (null on chart).
+    type ProdBucket = { value: number; callsEff: number | null; casesEff: number | null; qaNorm: number };
+    const productivityByBucket: Record<string, ProdBucket> = {};
+    const agentSubNivel = currentUser?.subNivel;
+    if (agentSubNivel === 'Calls' || agentSubNivel === 'Follow up') {
+      new Set([...Object.keys(out), ...Object.keys(qaByBucket)]).forEach(k => {
+        const qa = qaByBucket[k];
+        if (qa == null) return; // no QA data → gap
+        const qaNorm = Math.min(100, (qa / 80) * 100);
+        const closedCases   = out[k]?.['Closed Cases']   ?? 0;
+        const incomingCalls = out[k]?.['Incoming Calls'] ?? 0;
+        const nonFcr        = nonFcrClosedByBucket[k]    ?? 0;
+        if (agentSubNivel === 'Calls') {
+          const callsEff = incomingCalls > 0
+            ? Math.min(100, (closedCases / (0.7 * incomingCalls)) * 100)
+            : (closedCases > 0 ? 100 : 0);
+          const value = (callsEff * 0.5) + (qaNorm * 0.5);
+          productivityByBucket[k] = { value: Number(value.toFixed(1)), callsEff: Number(callsEff.toFixed(1)), casesEff: null, qaNorm: Number(qaNorm.toFixed(1)) };
+        } else {
+          const casesEff = Math.min(100, (nonFcr / 5) * 100);
+          const value = (casesEff * 0.5) + (qaNorm * 0.5);
+          productivityByBucket[k] = { value: Number(value.toFixed(1)), callsEff: null, casesEff: Number(casesEff.toFixed(1)), qaNorm: Number(qaNorm.toFixed(1)) };
+        }
+      });
+    }
+
+    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket, productivityByBucket };
+  }, [dbCases, dbClosedCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate, currentUser]);
 
   const trendData = React.useMemo(() => {
     if (rawHistoricalData.length === 0) return [];
@@ -1140,6 +1204,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     Object.keys(dbTrendByBucket.nsatClaimsByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.backlogByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.fcrByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.productivityByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
       const entry: any = {
@@ -1182,6 +1247,12 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           entry[indicator] = v !== undefined ? v : null;
           return;
         }
+        // Productivity: DB-computed for Calls/Follow up agents; mock for NA/undefined
+        if (indicator === 'Productivity' && (currentUser?.subNivel === 'Calls' || currentUser?.subNivel === 'Follow up')) {
+          const pb = dbTrendByBucket.productivityByBucket[key];
+          entry[indicator] = pb?.value ?? null;
+          return;
+        }
         // Other DB-backed indicators: 0 is a legitimate count
         if (DB_INDICATORS.has(indicator)) {
           entry[indicator] = dbTrendByBucket.out[key]?.[indicator as keyof typeof dbTrendByBucket.out[string]] ?? 0;
@@ -1206,9 +1277,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       entry['_closedInfo']      = ob?.['Closed Cases Information'] ?? 0;
       entry['_closedComplaint'] = ob?.['Closed Cases Complaint']   ?? 0;
 
+      // Inject Productivity formula components for the tooltip breakdown
+      const pb = dbTrendByBucket.productivityByBucket[key];
+      entry['_prodSubNivel'] = currentUser?.subNivel ?? null;
+      entry['_prodCallsEff'] = pb?.callsEff ?? null;
+      entry['_prodCasesEff'] = pb?.casesEff ?? null;
+      entry['_prodQaNorm']   = pb?.qaNorm   ?? null;
+
       return entry;
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [rawHistoricalData, startDate, endDate, hierarchy, selectedIndicators, dbTrendByBucket, DB_INDICATORS]);
+  }, [rawHistoricalData, startDate, endDate, hierarchy, selectedIndicators, dbTrendByBucket, DB_INDICATORS, currentUser]);
 
   // Summary stat shown in the line chart header (one badge per selected indicator).
   //   COUNT  — Opened/Closed Cases, Incoming Calls → SUM of trendData values
@@ -1435,7 +1513,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // individual line equals the team line for those indicators).
   const memberBuckets = React.useMemo(() => {
     if (!selectedTeamMember || !isManagement) return null;
-    if (!DB_INDICATORS.has(currentIndicator)) return null;
+    if (!DB_INDICATORS.has(currentIndicator) && currentIndicator !== 'Productivity') return null;
     if (currentIndicator === 'Still Open Cases' || currentIndicator === 'Backlog') return null;
 
     const m = users[selectedTeamMember];
@@ -1536,6 +1614,55 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
         result[k] = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
       });
+    } else if (currentIndicator === 'Productivity' && m?.subNivel && m.subNivel !== 'NA') {
+      // Per-bucket Productivity for the selected member
+      const mClosed: Record<string, number> = {};
+      const mNonFcr: Record<string, number> = {};
+      const mCalls:  Record<string, number> = {};
+      const mQaAcc:  Record<string, { sum: number; count: number }> = {};
+      if (m.compass && dbClosedCases) {
+        dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+          const d = dayjs(c.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          const k = d.format(formatStr);
+          mClosed[k] = (mClosed[k] || 0) + 1;
+          if (!c.openedDateStr || c.openedDateStr !== c.dateStr) mNonFcr[k] = (mNonFcr[k] || 0) + 1;
+        });
+      }
+      if (m.subNivel === 'Calls' && dbActivity) {
+        dbActivity.filter(a => a.user === m.callPicker || a.user === m.genesys).forEach(a => {
+          const d = dayjs(a.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          const k = d.format(formatStr);
+          mCalls[k] = (mCalls[k] || 0) + a.answeredCalls;
+        });
+      }
+      if (m.qa && dbQA) {
+        dbQA.filter(q => q.agente === m.qa).forEach(q => {
+          const d = dayjs(q.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          const k = d.format(formatStr);
+          if (!mQaAcc[k]) mQaAcc[k] = { sum: 0, count: 0 };
+          mQaAcc[k].sum += q.score; mQaAcc[k].count++;
+        });
+      }
+      new Set([...Object.keys(mClosed), ...Object.keys(mQaAcc)]).forEach(k => {
+        const qaEntry = mQaAcc[k];
+        if (!qaEntry) return;
+        const qaNorm = Math.min(100, (qaEntry.sum / qaEntry.count / 80) * 100);
+        let prodVal: number;
+        if (m.subNivel === 'Calls') {
+          const calls = mCalls[k] || 0;
+          const closed = mClosed[k] || 0;
+          const eff = calls > 0 ? Math.min(100, (closed / (0.7 * calls)) * 100) : (closed > 0 ? 100 : 0);
+          prodVal = (eff * 0.5) + (qaNorm * 0.5);
+        } else {
+          const nonFcr = mNonFcr[k] || 0;
+          const eff = Math.min(100, (nonFcr / 5) * 100);
+          prodVal = (eff * 0.5) + (qaNorm * 0.5);
+        }
+        result[k] = Number(prodVal.toFixed(1));
+      });
     }
 
     return result;
@@ -1546,6 +1673,102 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const formatStr = hierarchy === 'day' ? 'YYYY-MM-DD' :
                      hierarchy === 'week' ? 'YYYY-ww' :
                      hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
+
+    // Productivity: per-member computation averaged for team line.
+    // Each member's formula depends on their own subNivel (Calls / Follow up).
+    // Members with subNivel=NA or undefined contribute mock values (skipped here).
+    if (currentIndicator === 'Productivity') {
+      const fmt = hierarchy === 'day' ? 'YYYY-MM-DD' :
+                  hierarchy === 'week' ? 'YYYY-ww' :
+                  hierarchy === 'month' ? 'YYYY-MM' : 'YYYY';
+      // Accumulate per-bucket team sums
+      const teamSums: Record<string, { sum: number; count: number }> = {};
+      // Per-member productivity buckets (with breakdown) for member individual line
+      const memberProdBuckets: Record<string, { value: number; callsEff: number | null; casesEff: number | null; qaNorm: number }> = {};
+      const selMember = selectedTeamMember ? users[selectedTeamMember] : null;
+
+      teamRfcs.forEach(rfc => {
+        const m = users[rfc];
+        if (!m?.subNivel || m.subNivel === 'NA' || m.subNivel === 'na') return;
+        const mClosed: Record<string, number> = {};
+        const mNonFcr: Record<string, number> = {};
+        const mCalls:  Record<string, number> = {};
+        const mQaAcc:  Record<string, { sum: number; count: number }> = {};
+
+        if (m.compass) {
+          dbClosedCases?.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+            const d = dayjs(c.dateStr);
+            if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+            const k = d.format(fmt);
+            mClosed[k] = (mClosed[k] || 0) + 1;
+            if (!c.openedDateStr || c.openedDateStr !== c.dateStr) mNonFcr[k] = (mNonFcr[k] || 0) + 1;
+          });
+        }
+        if (m.subNivel === 'Calls') {
+          dbActivity?.filter(a => a.user === m.callPicker || a.user === m.genesys).forEach(a => {
+            const d = dayjs(a.dateStr);
+            if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+            const k = d.format(fmt);
+            mCalls[k] = (mCalls[k] || 0) + a.answeredCalls;
+          });
+        }
+        if (m.qa) {
+          dbQA?.filter(q => q.agente === m.qa).forEach(q => {
+            const d = dayjs(q.dateStr);
+            if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+            const k = d.format(fmt);
+            if (!mQaAcc[k]) mQaAcc[k] = { sum: 0, count: 0 };
+            mQaAcc[k].sum += q.score; mQaAcc[k].count++;
+          });
+        }
+
+        new Set([...Object.keys(mClosed), ...Object.keys(mQaAcc)]).forEach(k => {
+          const qaEntry = mQaAcc[k];
+          if (!qaEntry) return;
+          const qaNorm = Math.min(100, (qaEntry.sum / qaEntry.count / 80) * 100);
+          let prodVal: number;
+          let callsEff: number | null = null;
+          let casesEff: number | null = null;
+          if (m.subNivel === 'Calls') {
+            const calls = mCalls[k] || 0;
+            const closed = mClosed[k] || 0;
+            callsEff = calls > 0 ? Math.min(100, (closed / (0.7 * calls)) * 100) : (closed > 0 ? 100 : 0);
+            prodVal = (callsEff * 0.5) + (qaNorm * 0.5);
+          } else {
+            const nonFcr = mNonFcr[k] || 0;
+            casesEff = Math.min(100, (nonFcr / 5) * 100);
+            prodVal = (casesEff * 0.5) + (qaNorm * 0.5);
+          }
+          if (!teamSums[k]) teamSums[k] = { sum: 0, count: 0 };
+          teamSums[k].sum += prodVal; teamSums[k].count++;
+          // Capture member-individual breakdown for tooltip
+          if (selMember && rfc === selectedTeamMember) {
+            memberProdBuckets[k] = {
+              value: Number(prodVal.toFixed(1)),
+              callsEff: callsEff != null ? Number(callsEff.toFixed(1)) : null,
+              casesEff: casesEff != null ? Number(casesEff.toFixed(1)) : null,
+              qaNorm: Number(qaNorm.toFixed(1)),
+            };
+          }
+        });
+      });
+
+      const allKeys = new Set(Object.keys(teamSums));
+      if (selMember) Object.keys(memberProdBuckets).forEach(k => allKeys.add(k));
+      return Array.from(allKeys).sort().map(key => {
+        const ts = teamSums[key];
+        const teamVal = ts ? Number((ts.sum / ts.count).toFixed(1)) : null;
+        const mp = memberProdBuckets[key];
+        const entry: any = { name: key, fullDate: key, 'Team Average': teamVal };
+        if (selMember) entry['Member Individual'] = mp?.value ?? null;
+        // Inject productivity breakdown metadata for tooltip
+        entry['_mProdSubNivel'] = selMember?.subNivel ?? null;
+        entry['_mProdCallsEff'] = mp?.callsEff ?? null;
+        entry['_mProdCasesEff'] = mp?.casesEff ?? null;
+        entry['_mProdQaNorm']   = mp?.qaNorm   ?? null;
+        return entry;
+      });
+    }
 
     // BD-backed path: team value comes from dbTrendByBucket (already team-
     // aggregated since management roles fetch ALL team data), member value
@@ -1664,7 +1887,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       }
       return entry;
     }).sort((a,b) => a.name.localeCompare(b.name));
-  }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember, DB_INDICATORS, dbTrendByBucket, memberBuckets, dbCases, dbClosedCases, users]);
+  }, [isManagement, teamRfcs, startDate, endDate, hierarchy, currentIndicator, selectedTeamMember, DB_INDICATORS, dbTrendByBucket, memberBuckets, dbCases, dbClosedCases, dbActivity, dbQA, users]);
 
   const dataKeyManagement = indicatorMap[currentIndicator];
 
@@ -1676,7 +1899,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   //     the team isn't randomly tied)
   const memberValuesForRanking = React.useMemo(() => {
     if (!isManagement) return null;
-    if (!DB_INDICATORS.has(currentIndicator)) return null;
+    if (!DB_INDICATORS.has(currentIndicator) && currentIndicator !== 'Productivity') return null;
     if (currentIndicator === 'Still Open Cases' || currentIndicator === 'Backlog') return null;
 
     const FMT = 'M/D/YYYY h:mm A';
@@ -1756,6 +1979,37 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         if (qs.some(q => q.t > 0)) {
           const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
           val = Math.round((perQ[0] + perQ[1] + perQ[2]) / 3);
+        }
+      } else if (currentIndicator === 'Productivity' && m?.subNivel && m.subNivel !== 'NA' && m.compass) {
+        // Period-level Productivity: use aggregate across the whole range for ranking
+        const mClosed = dbClosedCases?.filter(c => {
+          if (c.caseClosedBy !== m.compass) return false;
+          const d = dayjs(c.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }) ?? [];
+        const nonFcr = mClosed.filter(c => !c.openedDateStr || c.openedDateStr !== c.dateStr).length;
+        const calls = m.subNivel === 'Calls'
+          ? (dbActivity?.filter(a => {
+              if (a.user !== m.callPicker && a.user !== m.genesys) return false;
+              const d = dayjs(a.dateStr);
+              return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+            }).reduce((acc, a) => acc + a.answeredCalls, 0) ?? 0)
+          : 0;
+        const qaRows = m.qa ? (dbQA?.filter(q => {
+          if (q.agente !== m.qa) return false;
+          const d = dayjs(q.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }) ?? []) : [];
+        if (qaRows.length > 0) {
+          const avgQa = qaRows.reduce((acc, q) => acc + q.score, 0) / qaRows.length;
+          const qaNorm = Math.min(100, (avgQa / 80) * 100);
+          let eff: number;
+          if (m.subNivel === 'Calls') {
+            eff = calls > 0 ? Math.min(100, (mClosed.length / (0.7 * calls)) * 100) : (mClosed.length > 0 ? 100 : 0);
+          } else {
+            eff = Math.min(100, (nonFcr / 5) * 100);
+          }
+          val = Number(((eff * 0.5) + (qaNorm * 0.5)).toFixed(1));
         }
       }
 
@@ -2004,7 +2258,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       // otherwise fall back to Recharts' default rendering via the prop.
                       const { active, payload } = props;
                       if (!active || !payload?.length) return null;
-                      if (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases') {
+                      if (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases' || currentIndicator === 'Productivity') {
                         return (
                           <CasesTooltip
                             {...props}
@@ -2052,7 +2306,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     strokeWidth={4}
                     dot={{ r: 4 }}
                     activeDot={{ r: 8 }}
-                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution'].includes(currentIndicator)}
+                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Productivity'].includes(currentIndicator)}
                   />
                   {selectedTeamMember && (
                     <Line
@@ -2062,7 +2316,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       strokeWidth={3}
                       strokeDasharray="5 5"
                       dot={{ r: 4 }}
-                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution'].includes(currentIndicator)}
+                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Productivity'].includes(currentIndicator)}
                     />
                   )}
                 </LineChart>
@@ -2327,7 +2581,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     )}
                     <Tooltip
                       content={(props: any) => {
-                        const hasBreakdown = selectedIndicators.some(i => i === 'Opened Cases' || i === 'Closed Cases');
+                        const hasBreakdown = selectedIndicators.some(i => i === 'Opened Cases' || i === 'Closed Cases' || i === 'Productivity');
                         if (hasBreakdown) {
                           return (
                             <CasesTooltip
@@ -2383,7 +2637,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
-                          connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution'].includes(indicator)}
+                          connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Productivity'].includes(indicator)}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
