@@ -202,38 +202,37 @@ async function startServer() {
     }
 
     try {
-      const { case_owner, startDate, endDate } = req.query;
-      
-      // Basic query to fetch all from Abiertos
-      // In production, we'd filter in SQL, but since datetime_opened is varchar and 
-      // follows a specific format MM/DD/YYYY hh:mm AM/PM, it's easier to parse in JS
-      // or use complex SQL. For this demo, let's try to do it accurately.
-      
-      let query = 'SELECT * FROM "Abiertos"';
-      let params: any[] = [];
-      
-      if (case_owner) {
-        query += ' WHERE "case_owner" = $1';
-        params.push(case_owner);
+      const { case_owner, user, startDate, endDate } = req.query as {
+        case_owner?: string; user?: string; startDate?: string; endDate?: string;
+      };
+
+      // Accept ?user=id1,id2,... (preferred — filters in SQL) or legacy ?case_owner=id.
+      const ownerList = user
+        ? (user as string).split(',').map(s => s.trim()).filter(Boolean)
+        : case_owner ? [(case_owner as string).trim()] : [];
+
+      let data: any[];
+      if (ownerList.length > 0) {
+        const placeholders = ownerList.map((_, i) => `$${i + 1}`).join(',');
+        const result = await pool.query(
+          `SELECT * FROM "Abiertos" WHERE "case_owner" IN (${placeholders})`,
+          ownerList,
+        );
+        data = result.rows;
+      } else {
+        const result = await pool.query('SELECT * FROM "Abiertos"');
+        data = result.rows;
       }
 
-      const result = await pool.query(query, params);
-      
-      // Filter by date in JavaScript to handle the specific varchar format
-      let data = result.rows;
-      
+      // Date filter in JS — datetime_opened is varchar "M/D/YYYY h:mm A".
       if (startDate || endDate) {
         const start = startDate ? dayjs(startDate as string) : null;
-        const end = endDate ? dayjs(endDate as string) : null;
-        
+        const end   = endDate   ? dayjs(endDate as string)   : null;
         data = data.filter(row => {
-          // Format: 7/30/2025 11:27 AM -> M/D/YYYY h:mm A
           const openedAt = dayjs(row.datetime_opened, 'M/D/YYYY h:mm A');
           if (!openedAt.isValid()) return false;
-          
           if (start && openedAt.isBefore(start, 'day')) return false;
-          if (end && openedAt.isAfter(end, 'day')) return false;
-          
+          if (end   && openedAt.isAfter(end,   'day')) return false;
           return true;
         });
       }

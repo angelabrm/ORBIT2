@@ -6,10 +6,12 @@ export interface OpenedCase {
   [key: string]: any;
 }
 
-export const fetchOpenedCases = async (caseOwner?: string, startDate?: any, endDate?: any): Promise<OpenedCase[]> => {
+// compassIds: array of Compass IDs to filter by in SQL (preferred over caseOwner).
+// Pass undefined/[] to fetch all rows (needed for team-wide backlog computation).
+export const fetchOpenedCases = async (compassIds?: string[], startDate?: any, endDate?: any): Promise<OpenedCase[]> => {
   try {
     const params = new URLSearchParams();
-    if (caseOwner) params.append('case_owner', caseOwner);
+    if (compassIds && compassIds.length > 0) params.append('user', compassIds.join(','));
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate) params.append('endDate', dayjs(endDate).toISOString());
 

@@ -760,19 +760,17 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       const dbOpenedAllStart = startDate.subtract(3, 'month').startOf('month');
 
       if (scopeIsCAC) {
-        // Two parallel fetches: narrow (for the user) + extended (for Backlog).
+        // Two parallel fetches: narrow (for the user, SQL-filtered) + extended (for Backlog, team-wide).
         const [userCases, allCases] = await Promise.all([
-          compassIds.length > 0 ? fetchOpenedCases(undefined, startDate, endDate) : Promise.resolve(null),
-          fetchOpenedCases(undefined, dbOpenedAllStart, endDate),
+          compassIds.length > 0 ? fetchOpenedCases(compassIds, startDate, endDate) : Promise.resolve(null),
+          fetchOpenedCases(undefined, dbOpenedAllStart, endDate), // backlog needs full team; no user filter
         ]);
-        setDbCases(userCases && compassIds.length > 0
-          ? userCases.filter(c => compassIds.includes(c.case_owner))
-          : null);
+        setDbCases(userCases ?? null); // server already filtered by compassIds — no client filter needed
         setDbOpenedAll(allCases);
       } else if (compassIds.length > 0) {
-        // Non-CAC scope: only the per-user fetch.
-        const cases = await fetchOpenedCases(undefined, startDate, endDate);
-        setDbCases(cases.filter(c => compassIds.includes(c.case_owner)));
+        // Non-CAC scope: only the per-user fetch, SQL-filtered.
+        const cases = await fetchOpenedCases(compassIds, startDate, endDate);
+        setDbCases(cases);
         setDbOpenedAll(null);
       } else {
         setDbCases(null);

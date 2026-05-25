@@ -199,26 +199,37 @@ app.get('/api/opened-cases', async (req, res) => {
     const pool = await getPool();
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
 
-    const { case_owner, startDate, endDate } = req.query as { case_owner?: string; startDate?: string; endDate?: string };
+    const { case_owner, user, startDate, endDate } = req.query as {
+      case_owner?: string; user?: string; startDate?: string; endDate?: string;
+    };
+
+    // Accept ?user=id1,id2,... (preferred — filters in SQL) or legacy ?case_owner=id (single).
+    // Without a user list the full table is returned (needed for team-wide backlog fetch).
+    const ownerList = user
+      ? user.split(',').map(s => s.trim()).filter(Boolean)
+      : case_owner ? [case_owner.trim()] : [];
 
     let rows: any[];
-    if (case_owner) {
-      const r = await pool.query('SELECT * FROM "Abiertos" WHERE "case_owner" = $1', [case_owner]);
+    if (ownerList.length > 0) {
+      const placeholders = ownerList.map((_, i) => `$${i + 1}`).join(',');
+      const r = await pool.query(
+        `SELECT * FROM "Abiertos" WHERE "case_owner" IN (${placeholders})`,
+        ownerList,
+      );
       rows = r.rows;
     } else {
       const r = await pool.query('SELECT * FROM "Abiertos"');
       rows = r.rows;
     }
 
+    // Date filter in JS — datetime_opened is varchar "M/D/YYYY h:mm A", simpler to parse here.
     if (startDate || endDate) {
       const start = startDate ? Date.parse(startDate) : null;
       const end   = endDate   ? Date.parse(endDate)   : null;
-      // Filter by datetime_opened only — Closed Cases are now sourced from
-      // the Cerrados table via /api/closed-cases.
       rows = rows.filter(row => {
         const t = parseOpenedAt(row.datetime_opened);
         if (t === null) return false;
-        if (start !== null && t < start - 86400000) return false; // ±1 day TZ tolerance
+        if (start !== null && t < start - 86400000) return false;
         if (end   !== null && t > end   + 86400000) return false;
         return true;
       });
@@ -429,18 +440,31 @@ async function queryQaTable(
   tableName: string,
   agentCol: string,
   userList: string[],
+  startDate?: string,
+  endDate?: string,
 ): Promise<{ rows: any[]; cols: string[] }> {
   try {
-    let r;
+    const params: any[] = [];
+    const conditions: string[] = [];
+
     if (userList.length > 0) {
-      const placeholders = userList.map((_, i) => `$${i + 1}`).join(',');
-      r = await pool.query(
-        `SELECT * FROM "${tableName}" WHERE "${agentCol}" IN (${placeholders})`,
-        userList,
-      );
-    } else {
-      r = await pool.query(`SELECT * FROM "${tableName}"`);
+      const placeholders = userList.map((_, i) => `$${params.length + i + 1}`).join(',');
+      conditions.push(`"${agentCol}" IN (${placeholders})`);
+      params.push(...userList);
     }
+    // "Marca temporal" is a timestamp column — filter in SQL to avoid transferring
+    // rows outside the date range. Cast to date for TZ-safe day comparison.
+    if (startDate) {
+      params.push(startDate);
+      conditions.push(`"Marca temporal"::date >= $${params.length}::date`);
+    }
+    if (endDate) {
+      params.push(endDate);
+      conditions.push(`"Marca temporal"::date <= $${params.length}::date`);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const r = await pool.query(`SELECT * FROM "${tableName}" ${where}`, params);
     return {
       rows: r.rows,
       cols: (r.fields || []).map((f: any) => f.name),
@@ -463,10 +487,10 @@ app.get('/api/qa', async (req, res) => {
       .map(s => s.trim())
       .filter(Boolean);
 
-    // Query both tables in parallel.
+    // Query both tables in parallel — date filter pushed down to SQL.
     const [qa, premium] = await Promise.all([
-      queryQaTable(pool, 'QA',         'Agente', userList),
-      queryQaTable(pool, 'QA_Premium', 'Agent',  userList),
+      queryQaTable(pool, 'QA',         'Agente', userList, startDate, endDate),
+      queryQaTable(pool, 'QA_Premium', 'Agent',  userList, startDate, endDate),
     ]);
 
     const qaConfig:      QaConfig = { thumbsUp: 'Pulgar Arriba', naCountsAsFull: false };
@@ -636,12 +660,28 @@ app.get('/api/still-open-cases', async (req, res) => {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
 
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
-    const r = await pool.query('SELECT "fecha_en_que_esta_abierto" FROM "Aun_Abiertos"');
+
+    // Try to push the date filter to SQL (works when the column is a proper date/timestamp).
+    // Falls back to a full-table fetch + JS filter if the cast fails.
+    let rawRows: any[];
+    try {
+      const sqlParams: any[] = [];
+      const conditions: string[] = [];
+      if (startDate) { sqlParams.push(startDate); conditions.push(`"fecha_en_que_esta_abierto"::date >= $${sqlParams.length}::date`); }
+      if (endDate)   { sqlParams.push(endDate);   conditions.push(`"fecha_en_que_esta_abierto"::date <= $${sqlParams.length}::date`); }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      const r = await pool.query(`SELECT "fecha_en_que_esta_abierto" FROM "Aun_Abiertos" ${where}`, sqlParams);
+      rawRows = r.rows;
+    } catch {
+      // Column type doesn't support ::date cast — fall back to full fetch.
+      const r = await pool.query('SELECT "fecha_en_que_esta_abierto" FROM "Aun_Abiertos"');
+      rawRows = r.rows;
+    }
 
     const start = startDate ? Date.parse(startDate) : null;
     const end   = endDate   ? Date.parse(endDate)   : null;
 
-    const out = r.rows
+    const out = rawRows
       .map((row: any) => {
         const p = parseDateFlex(row['fecha_en_que_esta_abierto']);
         if (p === null) return null;
