@@ -904,7 +904,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   // Indicators that are now sourced from the Neon DB instead of mock data.
   // As more tables become available in Neon, add their indicator names here.
   const DB_INDICATORS = React.useMemo(
-    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Still Open Cases', 'Backlog', '% First Contact Resolution']),
+    () => new Set(['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Incoming Calls', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Still Open Cases', 'Backlog', '% First Contact Resolution', 'Calls Efficiency']),
     []
   );
 
@@ -1001,6 +1001,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
+    // Calls Efficiency = (Closed Cases / Incoming Calls) × 100 per bucket.
+    // Computed after both Cerrados and Actividad loops — populated below after Actividad.
+    const callsEffByBucket: Record<string, number> = {};
+
     // Actividad → SUM of "Answered Calls" per bucket.
     // Use the pre-parsed dateStr ("YYYY-MM-DD") to bucket — parsing dateMs through
     // dayjs would shift by the browser's TZ offset and put e.g. 2026-03-15 into
@@ -1012,6 +1016,14 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         ensure(d.format(formatStr))['Incoming Calls'] += a.answeredCalls;
       });
     }
+
+    // Populate Calls Efficiency now that both Closed Cases and Incoming Calls are finalized.
+    // Buckets with 0 incoming calls stay out → null on chart (gap).
+    Object.keys(out).forEach(k => {
+      const calls  = out[k]['Incoming Calls'];
+      const closed = out[k]['Closed Cases'];
+      if (calls > 0) callsEffByBucket[k] = Number(((closed / calls) * 100).toFixed(1));
+    });
 
     // QA → AVERAGE of per-evaluation scores per bucket.
     //   Per-evaluation score (0-100) is computed server-side from the 10
@@ -1172,7 +1184,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       });
     }
 
-    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket, productivityByBucket };
+    return { out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket, callsEffByBucket, productivityByBucket };
   }, [dbCases, dbClosedCases, dbActivity, dbQA, dbNSAT, dbStillOpen, dbOpenedAll, hierarchy, startDate, endDate, currentUser]);
 
   const trendData = React.useMemo(() => {
@@ -1204,6 +1216,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     Object.keys(dbTrendByBucket.nsatClaimsByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.backlogByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.fcrByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
+    Object.keys(dbTrendByBucket.callsEffByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
     Object.keys(dbTrendByBucket.productivityByBucket).forEach(k => { if (!groups[k]) groups[k] = []; });
 
     return Object.entries(groups).map(([key, items]) => {
@@ -1244,6 +1257,11 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         }
         if (indicator === '% First Contact Resolution') {
           const v = dbTrendByBucket.fcrByBucket[key];
+          entry[indicator] = v !== undefined ? v : null;
+          return;
+        }
+        if (indicator === 'Calls Efficiency') {
+          const v = dbTrendByBucket.callsEffByBucket[key];
           entry[indicator] = v !== undefined ? v : null;
           return;
         }
@@ -1296,7 +1314,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     const COUNT_SET = new Set(['Opened Cases', 'Closed Cases', 'Incoming Calls']);
     const NSAT_SET  = new Set(['NSAT', 'NSAT Information', 'NSAT Claims']);
     const PCT_SET   = new Set(['QA', 'Backlog', '% First Contact Resolution', 'Closed Cases Rate',
-                                'Performance', 'Productivity', 'Bonus']);
+                                'Calls Efficiency', 'Performance', 'Productivity', 'Bonus']);
 
     return selectedIndicators.map(indicator => {
       if (COUNT_SET.has(indicator)) {
@@ -1568,6 +1586,26 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       Object.entries(acc).forEach(([k, { sameDay, total }]) => {
         if (total > 0) result[k] = Number(((sameDay / total) * 100).toFixed(1));
       });
+    } else if (currentIndicator === 'Calls Efficiency' && dbClosedCases && dbActivity) {
+      // Per-bucket: Closed Cases / Incoming Calls × 100
+      const mClosed: Record<string, number> = {};
+      const mCalls:  Record<string, number> = {};
+      if (m.compass) {
+        dbClosedCases.filter(c => c.caseClosedBy === m.compass).forEach(c => {
+          const d = dayjs(c.dateStr);
+          if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+          mClosed[d.format(formatStr)] = (mClosed[d.format(formatStr)] || 0) + 1;
+        });
+      }
+      dbActivity.filter(a => a.user === m.callPicker || a.user === m.genesys).forEach(a => {
+        const d = dayjs(a.dateStr);
+        if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+        mCalls[d.format(formatStr)] = (mCalls[d.format(formatStr)] || 0) + a.answeredCalls;
+      });
+      Object.keys(mCalls).forEach(k => {
+        const calls = mCalls[k];
+        if (calls > 0) result[k] = Number(((mClosed[k] || 0) / calls * 100).toFixed(1));
+      });
     } else if (currentIndicator === 'Incoming Calls' && dbActivity) {
       dbActivity.filter(a => a.user === m.callPicker || a.user === m.genesys).forEach(a => {
         const d = dayjs(a.dateStr);
@@ -1784,6 +1822,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         if (currentIndicator === 'NSAT Claims')      return dbTrendByBucket.nsatClaimsByBucket[key] ?? null;
         if (currentIndicator === 'Backlog')          return dbTrendByBucket.backlogByBucket[key]    ?? null;
         if (currentIndicator === '% First Contact Resolution') return dbTrendByBucket.fcrByBucket[key] ?? null;
+        if (currentIndicator === 'Calls Efficiency')           return dbTrendByBucket.callsEffByBucket[key] ?? null;
         const v = dbTrendByBucket.out[key]?.[currentIndicator as keyof typeof dbTrendByBucket.out[string]];
         return v !== undefined ? v : null;
       };
@@ -1796,6 +1835,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         ...Object.keys(dbTrendByBucket.nsatClaimsByBucket),
         ...Object.keys(dbTrendByBucket.backlogByBucket),
         ...Object.keys(dbTrendByBucket.fcrByBucket),
+        ...Object.keys(dbTrendByBucket.callsEffByBucket),
       ]);
 
       // Pre-compute per-member case breakdown for the tooltip (Opened/Closed only)
@@ -1948,6 +1988,18 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           const d = dayjs(a.dateStr);
           return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
         }).reduce((acc, a) => acc + a.answeredCalls, 0);
+      } else if (currentIndicator === 'Calls Efficiency' && dbClosedCases && dbActivity && m.compass) {
+        const totalCalls = dbActivity.filter(a => {
+          if (a.user !== m.callPicker && a.user !== m.genesys) return false;
+          const d = dayjs(a.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }).reduce((acc, a) => acc + a.answeredCalls, 0);
+        const totalClosed = dbClosedCases.filter(c => {
+          if (c.caseClosedBy !== m.compass) return false;
+          const d = dayjs(c.dateStr);
+          return d.isValid() && d.isBetween(startDate, endDate, 'day', '[]');
+        }).length;
+        val = totalCalls > 0 ? Number(((totalClosed / totalCalls) * 100).toFixed(1)) : 0;
       } else if (currentIndicator === 'QA' && dbQA && m.qa) {
         const mine = dbQA.filter(q => {
           if (q.agente !== m.qa) return false;
@@ -2150,7 +2202,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     // KPIs are aggregate scores computed from several indicators.
     { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
     // Indicators are values that come directly from a single source table.
-    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Still Open Cases', 'Backlog', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
+    { group: 'Indicators', options: ['Opened Cases', 'Closed Cases', 'Closed Cases Rate', 'Calls Efficiency', 'Still Open Cases', 'Backlog', 'QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Incoming Calls', 'Outgoing Calls', '% First Contact Resolution', 'Backlog Team'] }
   ];
 
   const getKpiColor = (val: number) => {
@@ -2306,7 +2358,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     strokeWidth={4}
                     dot={{ r: 4 }}
                     activeDot={{ r: 8 }}
-                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Productivity'].includes(currentIndicator)}
+                    connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Calls Efficiency', 'Productivity'].includes(currentIndicator)}
                   />
                   {selectedTeamMember && (
                     <Line
@@ -2316,7 +2368,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       strokeWidth={3}
                       strokeDasharray="5 5"
                       dot={{ r: 4 }}
-                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Productivity'].includes(currentIndicator)}
+                      connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Calls Efficiency', 'Productivity'].includes(currentIndicator)}
                     />
                   )}
                 </LineChart>
@@ -2637,7 +2689,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
                           animationDuration={1500}
-                          connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Productivity'].includes(indicator)}
+                          connectNulls={['QA', 'NSAT', 'NSAT Information', 'NSAT Claims', 'Backlog', '% First Contact Resolution', 'Calls Efficiency', 'Productivity'].includes(indicator)}
                         >
                           {trendData.length <= 25 && (
                             <LabelList
