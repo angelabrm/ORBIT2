@@ -162,8 +162,14 @@ El estado global (usuario autenticado, miembro seleccionado, pestaña activa, ra
 | Endpoint | Función |
 |----------|---------|
 | `GET /api/health` | Verifica conectividad con la base de datos |
-| `GET /api/opened-cases` | `Abiertos` — filtrado por `case_owner` (Compass ID) y `datetime_opened` |
-| `GET /api/closed-cases` | `Cerrados` — filtrado por `case_closed_by` (Compass ID) y `closed_date` (`M/D/YYYY` varchar) |
+| `GET /api/roster` | Google Sheets users, caché 5 min; expone `compass`, `callPicker`, `qa`, `genesys` |
+| `POST /api/login` | RFC lookup |
+| `GET /api/opened-cases` | `Abiertos` — `?user=id1,id2` filtra en SQL (`WHERE "case_owner" IN (...)`); filtro de fecha en JS (varchar `M/D/YYYY h:mm A`) |
+| `GET /api/closed-cases` | `Cerrados` — `case_closed_by` ↔ `Roster.Compass`; fecha de `closed_date` (`M/D/YYYY` varchar) |
+| `GET /api/incoming-calls` | `Actividad` + `Rendimiento_Agente` merged; `?user=` y `?genesys=` SQL IN + filtro de fecha |
+| `GET /api/qa` | `QA` + `QA_Premium` merged; `?user=` SQL IN + filtro de fecha en SQL sobre `Marca temporal` (timestamp) |
+| `GET /api/nsat` | `NSAT` + `NSAT_Premium` merged; entrega Q1/Q2/Q3 |
+| `GET /api/still-open-cases` | `Aun_Abiertos` — snapshot CAC-wide; filtro de fecha en SQL intentado, fallback JS |
 
 ### Base de datos
 
@@ -204,6 +210,7 @@ La aplicación está preparada para despliegue en **Vercel** (`vercel.json` pres
 - **Indicador `Productivity`** (mixto Neon/mock por `SubNivel`): Calls = `(CallsEff×0.5)+(QAnorm×0.5)`; Follow up = `(CasesEff×0.5)+(QAnorm×0.5)`; NA → mock. Tooltip muestra la fórmula y valores del bucket. Ver §11 para fórmulas completas
 - **SubNivel badge**: junto al nombre del usuario en Header y banner de miembro. Solo CAC con `SubNivel ≠ 'NA'`. Teal para "Calls", purple para "Follow up"
 - Aislamiento de sesión al cerrar
+- **Optimización de transferencia de red Neon:** `/api/opened-cases` ahora envía `WHERE "case_owner" IN (...)` al DB en lugar de traer la tabla completa y filtrar en JS. `queryQaTable` agrega filtro de fecha en SQL sobre `Marca temporal` (columna timestamp). `/api/still-open-cases` intenta filtro SQL con fallback JS. El fetch de backlog (team-wide) permanece sin filtro de usuario intencionalmente. El `fetchOpenedCases` en `apiService.ts` cambió de `caseOwner?: string` a `compassIds?: string[]` y envía los IDs como CSV en `?user=`
 
 ### Pendiente de implementar
 
@@ -407,7 +414,7 @@ El line chart de `AgentView` lista los indicadores en dos grupos: **KPIs** (mét
 | `parseSourceName` | Parsea `Actividad_YYYY_MM_DD.csv` → `{ dateStr, dateMs }` |
 | `parseMarcaTemporal` | Acepta `Date` (timestamp Postgres) o string ISO de QA |
 | `parseDateFlex` | Tolera Date, ISO, o `M/D/YYYY` (Abiertos varchar). Default para nuevas tablas |
-| `queryQaTable` | Wrappea SELECTs con try/catch para que una tabla faltante no tumbe el endpoint completo |
+| `queryQaTable(pool, tableName, agentCol, userList, startDate?, endDate?)` | Wrappea SELECTs con try/catch para que una tabla faltante no tumbe el endpoint; acepta `startDate`/`endDate` para filtro SQL sobre `Marca temporal::date` |
 | `isErrorCritico` | Compartido entre QA y QA_Premium: null/empty/`NA`/`N/A` → sin error |
 | `scoreQaRow` | Compartido entre las dos tablas QA, con `QaConfig` parametrizable (string de "thumbs up", regla NA) |
 
