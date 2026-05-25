@@ -17,7 +17,7 @@ import {
   Trophy,
   DollarSign
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, LabelList, ReferenceLine } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { METRICS_DATA, User, UserMetrics, getFilteredMetrics, generateHistoricalData } from '../../data/mockData';
 import { fetchOpenedCases, fetchIncomingCalls, IncomingCallRow, fetchQA, QARow, fetchNSAT, NSATRow, fetchStillOpenCases, StillOpenRow, fetchClosedCases, ClosedCaseRow } from '../../services/apiService';
@@ -661,6 +661,9 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const [selectedIndicators, setSelectedIndicators] = React.useState<string[]>(['Performance']);
   const [hierarchy, setHierarchy] = React.useState<'day' | 'week' | 'month' | 'year'>('day');
   const [hierarchyAnchor, setHierarchyAnchor] = React.useState<null | HTMLElement>(null);
+  // Reference lines: which indicator badges have the line enabled, and sum/avg mode for COUNT indicators
+  const [refLineEnabled, setRefLineEnabled] = React.useState<Record<string, boolean>>({});
+  const [refLineMode, setRefLineMode]    = React.useState<Record<string, 'sum' | 'avg'>>({});
   const [activeAdminTab, setActiveAdminTab] = React.useState<'homeOffice' | 'attendance' | 'adherence' | null>(null);
   const [selectedTeamMember, setSelectedTeamMember] = React.useState<string | null>(null);
   const [adminViewType, setAdminViewType] = React.useState<'personal' | 'team'>(
@@ -1353,11 +1356,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
     return selectedIndicators.map(indicator => {
       if (COUNT_SET.has(indicator)) {
-        const sum = trendData.reduce((acc, pt) => {
-          const v = pt[indicator];
-          return acc + (typeof v === 'number' ? v : 0);
-        }, 0);
-        return { indicator, value: sum, decimals: 0, suffix: '' };
+        const vals = trendData.map(pt => pt[indicator]).filter((v): v is number => typeof v === 'number');
+        const sum = vals.reduce((a, b) => a + b, 0);
+        const avgValue = vals.length > 0 ? sum / vals.length : null;
+        return { indicator, value: sum, avgValue, isCount: true, decimals: 0, suffix: '' };
       }
 
       if (NSAT_SET.has(indicator)) {
@@ -1369,7 +1371,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
           if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return false;
           return reasonFilter === null || n.contactReason1 === reasonFilter;
         });
-        if (rows.length === 0) return { indicator, value: null, decimals: 0, suffix: '' };
+        if (rows.length === 0) return { indicator, value: null, avgValue: null, isCount: false, decimals: 0, suffix: '' };
         type Q = { p: number; d: number; t: number };
         const qs: [Q, Q, Q] = [{ p:0,d:0,t:0 }, { p:0,d:0,t:0 }, { p:0,d:0,t:0 }];
         rows.forEach(n => {
@@ -1380,17 +1382,17 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
             else if (v <= 6) qs[i].d++;
           });
         });
-        if (qs.every(q => q.t === 0)) return { indicator, value: null, decimals: 0, suffix: '' };
+        if (qs.every(q => q.t === 0)) return { indicator, value: null, avgValue: null, isCount: false, decimals: 0, suffix: '' };
         const perQ = qs.map(q => q.t > 0 ? ((q.p - q.d) / q.t) * 100 : 0);
-        return { indicator, value: Math.round((perQ[0] + perQ[1] + perQ[2]) / 3), decimals: 0, suffix: '' };
+        return { indicator, value: Math.round((perQ[0] + perQ[1] + perQ[2]) / 3), avgValue: null, isCount: false, decimals: 0, suffix: '' };
       }
 
       // Average of non-null bucket values
       const vals = trendData.map(pt => pt[indicator]).filter((v): v is number => typeof v === 'number');
-      if (vals.length === 0) return { indicator, value: null, decimals: 1, suffix: '' };
+      if (vals.length === 0) return { indicator, value: null, avgValue: null, isCount: false, decimals: 1, suffix: '' };
       const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
       const suffix = PCT_SET.has(indicator) || indicator.startsWith('%') ? '%' : '';
-      return { indicator, value: avg, decimals: 1, suffix };
+      return { indicator, value: avg, avgValue: null, isCount: false, decimals: 1, suffix };
     });
   }, [selectedIndicators, trendData, dbNSAT, startDate, endDate]);
 
@@ -2680,29 +2682,54 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     <MenuItem onClick={() => handleHierarchyClose('month')}>MONTHS</MenuItem>
                     <MenuItem onClick={() => handleHierarchyClose('year')}>YEARS</MenuItem>
                   </Menu>
-                  {indicatorSummary.filter(s => s.value !== null).map((s, idx) => {
-                    const color = idx === 0 ? '#0ba0af' : idx === 1 ? '#B018D9' : '#FF7A00';
-                    const label = s.value !== null
+                  {indicatorSummary.filter(s => s.value !== null || s.avgValue !== null).map((s) => {
+                    const indIdx = selectedIndicators.indexOf(s.indicator);
+                    const color = indIdx === 0 ? '#0ba0af' : indIdx === 1 ? '#B018D9' : '#FF7A00';
+                    const isEnabled = !!refLineEnabled[s.indicator];
+                    const mode = refLineMode[s.indicator] || 'sum';
+                    const displayVal = s.isCount && mode === 'avg' ? s.avgValue : s.value;
+                    const label = displayVal !== null && displayVal !== undefined
                       ? (s.decimals === 0
-                          ? `${Math.round(s.value as number)}${s.suffix}`
-                          : `${(s.value as number).toFixed(s.decimals)}${s.suffix}`)
+                          ? `${Math.round(displayVal as number)}${s.suffix}`
+                          : `${(displayVal as number).toFixed(s.decimals)}${s.suffix}`)
                       : '—';
                     return (
-                      <Box
-                        key={s.indicator}
-                        sx={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-end',
-                          mt: 0.5,
-                        }}
-                      >
-                        <Typography sx={{ fontSize: 9, fontWeight: 700, opacity: 0.45, letterSpacing: 0.8, textTransform: 'uppercase', lineHeight: 1.2 }}>
-                          {s.indicator}
-                        </Typography>
-                        <Typography sx={{ fontSize: 18, fontWeight: 900, color, fontFamily: 'monospace', lineHeight: 1.1 }}>
-                          {label}
-                        </Typography>
+                      <Box key={s.indicator} sx={{ display: 'flex', alignItems: 'center', gap: 0.3, mt: 0.5 }}>
+                        <Checkbox
+                          size="small"
+                          checked={isEnabled}
+                          onChange={(e) => setRefLineEnabled(prev => ({ ...prev, [s.indicator]: e.target.checked }))}
+                          sx={{ p: 0.3, color: `${color}66`, '&.Mui-checked': { color }, '& .MuiSvgIcon-root': { fontSize: 16 } }}
+                        />
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.2 }}>
+                            <Typography sx={{ fontSize: 9, fontWeight: 700, opacity: 0.45, letterSpacing: 0.8, textTransform: 'uppercase', lineHeight: 1.2 }}>
+                              {s.indicator}
+                            </Typography>
+                            {s.isCount && isEnabled && (
+                              <Box sx={{ display: 'flex', border: `1px solid ${color}55`, borderRadius: 0.5, overflow: 'hidden' }}>
+                                {(['sum', 'avg'] as const).map(m => (
+                                  <Box
+                                    key={m}
+                                    onClick={() => setRefLineMode(prev => ({ ...prev, [s.indicator]: m }))}
+                                    sx={{
+                                      px: 0.7, fontSize: 8, fontWeight: 900, cursor: 'pointer', lineHeight: '16px',
+                                      bgcolor: mode === m ? color : 'transparent',
+                                      color: mode === m ? '#fff' : color,
+                                      transition: 'all 0.15s',
+                                      userSelect: 'none',
+                                    }}
+                                  >
+                                    {m.toUpperCase()}
+                                  </Box>
+                                ))}
+                              </Box>
+                            )}
+                          </Box>
+                          <Typography sx={{ fontSize: 18, fontWeight: 900, color, fontFamily: 'monospace', lineHeight: 1.1 }}>
+                            {label}
+                          </Typography>
+                        </Box>
                       </Box>
                     );
                   })}
@@ -2779,6 +2806,35 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       }}
                     />
                     <Legend verticalAlign="bottom" height={36} iconType="circle" iconSize={12} wrapperStyle={{ fontSize: 14, fontWeight: 800, paddingTop: 25 }} />
+                    {/* Reference lines — one per badge with checkbox enabled */}
+                    {indicatorSummary
+                      .filter(s => refLineEnabled[s.indicator])
+                      .map((s) => {
+                        const indIdx = selectedIndicators.indexOf(s.indicator);
+                        const lineColor = indIdx === 0 ? theme.palette.primary.main : indIdx === 1 ? '#B018D9' : '#FF7A00';
+                        const mode = refLineMode[s.indicator] || 'sum';
+                        const refVal = (s.isCount && mode === 'avg' ? s.avgValue : s.value) as number | null;
+                        if (refVal == null) return null;
+                        const labelStr = isPctIndicator(s.indicator)
+                          ? `${refVal.toFixed(1)}%`
+                          : getIndType(s.indicator) === 'nsat'
+                          ? String(Math.round(refVal))
+                          : mode === 'avg'
+                          ? refVal.toFixed(1)
+                          : String(Math.round(refVal));
+                        return (
+                          <ReferenceLine
+                            key={s.indicator}
+                            yAxisId={getYAxisId(s.indicator)}
+                            y={refVal}
+                            stroke={lineColor}
+                            strokeDasharray="8 4"
+                            strokeWidth={2}
+                            label={{ value: labelStr, position: 'insideTopRight', fill: lineColor, fontSize: 12, fontWeight: 800 }}
+                          />
+                        );
+                      })
+                    }
                     {selectedIndicators.map((indicator, index) => {
                       const lineColor = index === 0 ? theme.palette.primary.main : index === 1 ? '#B018D9' : '#FF7A00';
                       const labelPos: any = index === 0 ? 'top' : index === 1 ? 'bottom' : 'top';
