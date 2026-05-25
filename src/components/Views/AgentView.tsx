@@ -522,7 +522,19 @@ const CasesTooltip: React.FC<{
   const subRowStyle: React.CSSProperties = { ...rowStyle, opacity: 0.7, fontSize: 12, paddingLeft: 10 };
   const valStyle: React.CSSProperties = { fontFamily: '"JetBrains Mono", monospace', fontWeight: 900 };
 
-  const formatVal = (v: any) => (v == null ? '—' : String(Number(v.toFixed ? v.toFixed(1) : v)));
+  // Percentage indicators — same set as in the component body
+  const PCT_SET_TT  = new Set(['QA', 'Backlog', '% First Contact Resolution', 'Closed Cases Rate', 'Calls Efficiency', 'Productivity', 'Performance', 'Bonus']);
+  const NSAT_SET_TT = new Set(['NSAT', 'NSAT Information', 'NSAT Claims']);
+  const COUNT_INT_TT = new Set(['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls', 'Still Open Cases']);
+
+  const formatVal = (v: any, indicatorName?: string) => {
+    if (v == null) return '—';
+    const num = Number(v.toFixed ? v.toFixed(1) : v);
+    if (indicatorName && PCT_SET_TT.has(indicatorName))  return `${num}%`;
+    if (indicatorName && NSAT_SET_TT.has(indicatorName)) return String(Math.round(num));
+    if (indicatorName && COUNT_INT_TT.has(indicatorName)) return String(Math.round(num));
+    return String(num);
+  };
 
   // Determine which indicators to show breakdown for
   const showOpenedBreakdown   = (isManagement ? currentIndicator === 'Opened Cases'    : indicators.includes('Opened Cases'));
@@ -551,11 +563,14 @@ const CasesTooltip: React.FC<{
         const ceClosedKey     = isMember ? '_mCallsEffClosed'  : '_callsEffClosed';
         const ceCallsKey      = isMember ? '_mCallsEffCalls'   : '_callsEffCalls';
 
+        // Resolve indicator name for formatting (management lines use currentIndicator)
+        const resolvedInd = isManagement ? (currentIndicator || name) : name;
+
         return (
           <React.Fragment key={i}>
             <div style={rowStyle}>
               <span style={{ color }}>{name}</span>
-              <span style={{ ...valStyle, color }}>{formatVal(val)}</span>
+              <span style={{ ...valStyle, color }}>{formatVal(val, resolvedInd)}</span>
             </div>
             {(lineIsOpened) && (
               <>
@@ -2249,6 +2264,47 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
     }
   };
 
+  // Axis type classification ─────────────────────────────────────────────────
+  // pct  → fixed domain [0, 100], tick formatter adds "%"
+  // nsat → flexible domain ['auto','auto'] (can be negative)
+  // count → domain [0, 'auto']
+  const PCT_IND_SET  = new Set(['QA', 'Backlog', '% First Contact Resolution', 'Closed Cases Rate', 'Calls Efficiency', 'Productivity', 'Performance', 'Bonus']);
+  const NSAT_IND_SET = new Set(['NSAT', 'NSAT Information', 'NSAT Claims']);
+  const getIndType = (ind: string): 'pct' | 'nsat' | 'count' =>
+    PCT_IND_SET.has(ind) ? 'pct' : NSAT_IND_SET.has(ind) ? 'nsat' : 'count';
+
+  const _indTypes   = selectedIndicators.map(getIndType);
+  const _hasPct     = _indTypes.includes('pct');
+  const _hasNonPct  = _indTypes.some(t => t !== 'pct');
+  // Two axes only when both pct and non-pct indicators are selected
+  const hasMixedAxes = _hasPct && _hasNonPct;
+  // Left axis: all non-pct share it (or all if same type)
+  const leftHasNsat  = _indTypes.some((t, i) => t === 'nsat' && (!hasMixedAxes || getIndType(selectedIndicators[i]) !== 'pct'));
+  const leftDomain: [any, any]  = !_hasNonPct ? [0, 100] : leftHasNsat ? ['auto', 'auto'] : [0, 'auto'];
+  const rightDomain: [any, any] = [0, 100];
+
+  // Assign each indicator to an axis id
+  const getYAxisId = (ind: string) => (hasMixedAxes && getIndType(ind) === 'pct') ? 'right' : 'left';
+
+  // Right axis color = color of the first indicator that lands on the right axis
+  const firstRightIdx = hasMixedAxes
+    ? selectedIndicators.findIndex(ind => getIndType(ind) === 'pct')
+    : -1;
+  const rightAxisColor = firstRightIdx === 0 ? theme.palette.primary.main
+                       : firstRightIdx === 1 ? '#B018D9'
+                       : '#FF7A00';
+
+  // Formatter for axis ticks and labels
+  const isPctIndicator = (ind: string) => PCT_IND_SET.has(ind);
+  const formatIndLabel = (ind: string, val: any): string => {
+    if (val == null) return '';
+    if (isPctIndicator(ind))    return `${formatValue(val)}%`;
+    if (NSAT_IND_SET.has(ind))  return String(formatValue(val, true));
+    const isInt = ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls', 'Still Open Cases'].includes(ind);
+    return String(formatValue(val, isInt));
+  };
+  // ──────────────────────────────────────────────────────────────────────────
+
   const indicatorOptions = [
     // KPIs are aggregate scores computed from several indicators.
     { group: 'KPIs', options: ['Performance', 'Productivity', 'Ranking', 'Bonus'] },
@@ -2665,21 +2721,23 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       minTickGap={30}
                       padding={{ left: 20, right: 20 }}
                     />
-                    <YAxis 
-                      yAxisId="left" 
-                      tick={{ fontSize: 14, opacity: 0.9, fontWeight: 800 }} 
+                    <YAxis
+                      yAxisId="left"
+                      tick={{ fontSize: 13, opacity: 0.9, fontWeight: 800 }}
                       stroke={theme.palette.primary.main}
                       width={60}
-                      domain={[0, 'auto']}
+                      domain={leftDomain}
+                      tickFormatter={(v) => !_hasNonPct ? `${v}%` : String(v)}
                     />
-                    {selectedIndicators.length > 1 && (
-                      <YAxis 
-                        yAxisId="right" 
-                        orientation="right" 
-                        tick={{ fontSize: 14, opacity: 0.9, fontWeight: 800 }} 
-                        stroke="#B018D9"
+                    {hasMixedAxes && (
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        tick={{ fontSize: 13, opacity: 0.9, fontWeight: 800 }}
+                        stroke={rightAxisColor}
                         width={60}
-                        domain={[0, 'auto']}
+                        domain={rightDomain}
+                        tickFormatter={(v) => `${v}%`}
                       />
                     )}
                     <Tooltip
@@ -2713,15 +2771,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                             <div style={{ fontSize: 18, marginBottom: 8, fontWeight: 800, color: theme.palette.primary.main, borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: 4 }}>{dateLabel}</div>
                             {payload.map((p: any, i: number) => {
                               const val = p.value; const name = p.name as string;
-                              let display: string;
-                              if (val == null) { display = '—'; }
-                              else if (name === 'QA' || name === 'Backlog') { display = `${formatValue(val)}%`; }
-                              else if (name === '% First Contact Resolution') { display = `${formatValue(val)}%`; }
-                              else if (['NSAT', 'NSAT Information', 'NSAT Claims'].includes(name)) { display = String(formatValue(val, true)); }
-                              else {
-                                const isInt = ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(name) || selectedIndicators.some(si => ['Opened Cases', 'Closed Cases', 'Incoming Calls', 'Outgoing Calls'].includes(si));
-                                display = String(formatValue(val, isInt));
-                              }
+                              const display = val == null ? '—' : formatIndLabel(name, val);
                               return <div key={i} style={{ fontSize: 18, padding: '4px 0', display: 'flex', justifyContent: 'space-between', gap: 20 }}><span style={{ color: p.color }}>{name}</span><span style={{ fontFamily: '"JetBrains Mono", monospace' }}>{display}</span></div>;
                             })}
                           </div>
@@ -2735,7 +2785,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       return (
                         <Line
                           key={indicator}
-                          yAxisId={index === 0 ? 'left' : 'right'}
+                          yAxisId={getYAxisId(indicator)}
                           type="monotone"
                           dataKey={indicator}
                           stroke={lineColor}
@@ -2750,22 +2800,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                               dataKey={indicator}
                               position={labelPos}
                               offset={15}
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 800,
-                                fill: lineColor,
-                                opacity: 1
-                              }}
-                              formatter={(val: any) => {
-                                if (val == null) return '';
-                                if (indicator === 'QA')               return `${formatValue(val)}%`;
-                                if (indicator === 'NSAT')             return String(formatValue(val, true));
-                                if (indicator === 'NSAT Information') return String(formatValue(val, true));
-                                if (indicator === 'NSAT Claims')      return String(formatValue(val, true));
-                                if (indicator === 'Backlog')          return `${formatValue(val, true)}%`;
-                                if (indicator === '% First Contact Resolution') return `${formatValue(val)}%`;
-                                return formatValue(val);
-                              }}
+                              style={{ fontSize: 13, fontWeight: 800, fill: lineColor, opacity: 1 }}
+                              formatter={(val: any) => formatIndLabel(indicator, val)}
                             />
                           )}
                         </Line>
