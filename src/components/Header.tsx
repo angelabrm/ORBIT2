@@ -74,7 +74,25 @@ const Header: React.FC = () => {
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-            <Typography variant="h6" sx={{ fontSize: 16, fontWeight: 800, lineHeight: 1, color: theme.palette.mode === 'dark' ? '#fff' : 'inherit' }}>{user?.name}</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="h6" sx={{ fontSize: 16, fontWeight: 800, lineHeight: 1, color: theme.palette.mode === 'dark' ? '#fff' : 'inherit' }}>{user?.name}</Typography>
+              {user?.serviceDesk === 'CAC' && user?.subNivel && user.subNivel !== 'NA' && (
+                <Chip
+                  label={user.subNivel}
+                  size="small"
+                  sx={{
+                    height: 18,
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: 0.8,
+                    bgcolor: user.subNivel === 'Calls' ? 'rgba(11,160,175,0.15)' : 'rgba(176,24,217,0.15)',
+                    color: user.subNivel === 'Calls' ? 'primary.main' : '#B018D9',
+                    border: `1px solid ${user.subNivel === 'Calls' ? 'rgba(11,160,175,0.4)' : 'rgba(176,24,217,0.4)'}`,
+                    '& .MuiChip-label': { px: 0.8 },
+                  }}
+                />
+              )}
+            </Box>
             <Typography variant="caption" sx={{ fontSize: 10, opacity: 0.7, letterSpacing: 1.5 }}>{user?.role.toUpperCase()} // AC_ID_{user?.rfc}</Typography>
           </Box>
           <Avatar 

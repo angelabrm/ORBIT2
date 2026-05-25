@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Box, useTheme, Typography, IconButton } from '@mui/material';
+import { Box, useTheme, Typography, IconButton, Chip } from '@mui/material';
 import { ArrowLeft } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -82,11 +82,32 @@ const Dashboard: React.FC<DashboardProps> = ({ mode, toggleTheme }) => {
                   <ArrowLeft size={20} />
                 </IconButton>
                 <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main', textTransform: 'uppercase', letterSpacing: 1 }}>
-                    You're seeing {selectedMember.role === 'Leader' ? `Leader ${selectedMember.serviceDesk}` : selectedMember.name} Dashboard
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main', textTransform: 'uppercase', letterSpacing: 1 }}>
+                      You're seeing {selectedMember.role === 'Leader' ? `Leader ${selectedMember.serviceDesk}` : selectedMember.name} Dashboard
+                    </Typography>
+                    {selectedMember.serviceDesk === 'CAC' && selectedMember.subNivel && selectedMember.subNivel !== 'NA' && (
+                      <Chip
+                        label={selectedMember.subNivel}
+                        size="small"
+                        sx={{
+                          height: 18,
+                          fontSize: 9,
+                          fontWeight: 800,
+                          letterSpacing: 0.8,
+                          bgcolor: selectedMember.subNivel === 'Calls' ? 'rgba(11,160,175,0.15)' : 'rgba(176,24,217,0.15)',
+                          color: selectedMember.subNivel === 'Calls' ? 'primary.main' : '#B018D9',
+                          border: `1px solid ${selectedMember.subNivel === 'Calls' ? 'rgba(11,160,175,0.4)' : 'rgba(176,24,217,0.4)'}`,
+                          '& .MuiChip-label': { px: 0.8 },
+                        }}
+                      />
+                    )}
+                  </Box>
                   <Typography variant="caption" sx={{ opacity: 0.6 }}>
                     Direct Support: {selectedMember.rfc} | {selectedMember.serviceDesk}
+                    {selectedMember.serviceDesk === 'CAC' && selectedMember.subNivel && selectedMember.subNivel !== 'NA'
+                      ? ` | ${selectedMember.subNivel}`
+                      : ''}
                   </Typography>
                 </Box>
               </Box>
