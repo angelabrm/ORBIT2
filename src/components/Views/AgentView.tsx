@@ -525,8 +525,9 @@ const CasesTooltip: React.FC<{
   const formatVal = (v: any) => (v == null ? '—' : String(Number(v.toFixed ? v.toFixed(1) : v)));
 
   // Determine which indicators to show breakdown for
-  const showOpenedBreakdown = (isManagement ? currentIndicator === 'Opened Cases' : indicators.includes('Opened Cases'));
-  const showClosedBreakdown = (isManagement ? currentIndicator === 'Closed Cases' : indicators.includes('Closed Cases'));
+  const showOpenedBreakdown   = (isManagement ? currentIndicator === 'Opened Cases'    : indicators.includes('Opened Cases'));
+  const showClosedBreakdown   = (isManagement ? currentIndicator === 'Closed Cases'    : indicators.includes('Closed Cases'));
+  const showCallsEffBreakdown = (isManagement ? currentIndicator === 'Calls Efficiency': indicators.includes('Calls Efficiency'));
 
   return (
     <div style={containerStyle}>
@@ -537,15 +538,18 @@ const CasesTooltip: React.FC<{
         const val   = p.value;
 
         // For management chart: determine if this line carries an Opened or Closed breakdown
-        const lineIsOpened = isManagement ? showOpenedBreakdown : name === 'Opened Cases';
-        const lineIsClosed = isManagement ? showClosedBreakdown : name === 'Closed Cases';
+        const lineIsOpened    = isManagement ? showOpenedBreakdown   : name === 'Opened Cases';
+        const lineIsClosed    = isManagement ? showClosedBreakdown   : name === 'Closed Cases';
+        const lineIsCallsEff  = isManagement ? showCallsEffBreakdown : name === 'Calls Efficiency';
         const isMember = name === 'Member Individual';
 
         // Select the right breakdown fields
-        const infoKey      = isMember ? '_mOpenedInfo'      : '_openedInfo';
-        const complaintKey = isMember ? '_mOpenedComplaint' : '_openedComplaint';
-        const cInfoKey     = isMember ? '_mClosedInfo'      : '_closedInfo';
-        const cComplaintKey= isMember ? '_mClosedComplaint' : '_closedComplaint';
+        const infoKey         = isMember ? '_mOpenedInfo'      : '_openedInfo';
+        const complaintKey    = isMember ? '_mOpenedComplaint' : '_openedComplaint';
+        const cInfoKey        = isMember ? '_mClosedInfo'      : '_closedInfo';
+        const cComplaintKey   = isMember ? '_mClosedComplaint' : '_closedComplaint';
+        const ceClosedKey     = isMember ? '_mCallsEffClosed'  : '_callsEffClosed';
+        const ceCallsKey      = isMember ? '_mCallsEffCalls'   : '_callsEffCalls';
 
         return (
           <React.Fragment key={i}>
@@ -574,6 +578,18 @@ const CasesTooltip: React.FC<{
                 <div style={subRowStyle}>
                   <span>↳ Complaint</span>
                   <span style={valStyle}>{pt[cComplaintKey] ?? 0}</span>
+                </div>
+              </>
+            )}
+            {(lineIsCallsEff) && (
+              <>
+                <div style={subRowStyle}>
+                  <span>↳ Closed Cases</span>
+                  <span style={valStyle}>{pt[ceClosedKey] ?? 0}</span>
+                </div>
+                <div style={subRowStyle}>
+                  <span>↳ Incoming Calls</span>
+                  <span style={valStyle}>{pt[ceCallsKey] ?? 0}</span>
                 </div>
               </>
             )}
@@ -1295,6 +1311,10 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
       entry['_closedInfo']      = ob?.['Closed Cases Information'] ?? 0;
       entry['_closedComplaint'] = ob?.['Closed Cases Complaint']   ?? 0;
 
+      // Inject Calls Efficiency components for the tooltip breakdown
+      entry['_callsEffClosed'] = ob?.['Closed Cases']   ?? 0;
+      entry['_callsEffCalls']  = ob?.['Incoming Calls'] ?? 0;
+
       // Inject Productivity formula components for the tooltip breakdown
       const pb = dbTrendByBucket.productivityByBucket[key];
       entry['_prodSubNivel'] = currentUser?.subNivel ?? null;
@@ -1840,11 +1860,35 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
 
       // Pre-compute per-member case breakdown for the tooltip (Opened/Closed only)
       const FMT2 = 'M/D/YYYY h:mm A';
-      const memberCompass = selectedTeamMember ? users[selectedTeamMember]?.compass : null;
+      const memberCompass   = selectedTeamMember ? users[selectedTeamMember]?.compass    : null;
+      const memberCallPicker = selectedTeamMember ? users[selectedTeamMember]?.callPicker : null;
+      const memberGenesys    = selectedTeamMember ? users[selectedTeamMember]?.genesys    : null;
       const memberBreakdown: Record<string, {
         'Opened Cases Information': number; 'Opened Cases Complaint': number;
         'Closed Cases Information': number; 'Closed Cases Complaint': number;
       }> = {};
+      // Per-member Calls Efficiency components: {closed, calls} per bucket
+      const memberCallsEff: Record<string, { closed: number; calls: number }> = {};
+      if (selectedTeamMember && currentIndicator === 'Calls Efficiency') {
+        if (memberCompass && dbClosedCases) {
+          dbClosedCases.filter(c => c.caseClosedBy === memberCompass).forEach(c => {
+            const d = dayjs(c.dateStr);
+            if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+            const k = d.format(formatStr);
+            if (!memberCallsEff[k]) memberCallsEff[k] = { closed: 0, calls: 0 };
+            memberCallsEff[k].closed++;
+          });
+        }
+        if (dbActivity) {
+          dbActivity.filter(a => a.user === memberCallPicker || a.user === memberGenesys).forEach(a => {
+            const d = dayjs(a.dateStr);
+            if (!d.isValid() || !d.isBetween(startDate, endDate, 'day', '[]')) return;
+            const k = d.format(formatStr);
+            if (!memberCallsEff[k]) memberCallsEff[k] = { closed: 0, calls: 0 };
+            memberCallsEff[k].calls += a.answeredCalls;
+          });
+        }
+      }
       const REASON_INFO2      = 'Information & Assistance requests';
       const REASON_COMPLAINT2 = 'Complaint';
       if (memberCompass && currentIndicator === 'Opened Cases' && dbCases) {
@@ -1886,12 +1930,19 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
         entry['_openedComplaint'] = ob?.['Opened Cases Complaint']   ?? 0;
         entry['_closedInfo']      = ob?.['Closed Cases Information'] ?? 0;
         entry['_closedComplaint'] = ob?.['Closed Cases Complaint']   ?? 0;
+        // Team Calls Efficiency components
+        entry['_callsEffClosed'] = ob?.['Closed Cases']   ?? 0;
+        entry['_callsEffCalls']  = ob?.['Incoming Calls'] ?? 0;
         // Member breakdown (only when member selected + relevant indicator)
         const mb = memberBreakdown[key];
         entry['_mOpenedInfo']      = mb?.['Opened Cases Information'] ?? 0;
         entry['_mOpenedComplaint'] = mb?.['Opened Cases Complaint']   ?? 0;
         entry['_mClosedInfo']      = mb?.['Closed Cases Information'] ?? 0;
         entry['_mClosedComplaint'] = mb?.['Closed Cases Complaint']   ?? 0;
+        // Member Calls Efficiency components
+        const mc = memberCallsEff[key];
+        entry['_mCallsEffClosed'] = mc?.closed ?? 0;
+        entry['_mCallsEffCalls']  = mc?.calls  ?? 0;
         return entry;
       });
     }
@@ -2193,7 +2244,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
   const handleIndicatorChange = (event: any) => {
     const value = event.target.value;
     const newSelection = typeof value === 'string' ? value.split(',') : value;
-    if (newSelection.length <= 2) {
+    if (newSelection.length <= 3) {
       setSelectedIndicators(newSelection);
     }
   };
@@ -2310,7 +2361,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       // otherwise fall back to Recharts' default rendering via the prop.
                       const { active, payload } = props;
                       if (!active || !payload?.length) return null;
-                      if (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases' || currentIndicator === 'Productivity') {
+                      if (currentIndicator === 'Opened Cases' || currentIndicator === 'Closed Cases' || currentIndicator === 'Calls Efficiency' || currentIndicator === 'Productivity') {
                         return (
                           <CasesTooltip
                             {...props}
@@ -2492,14 +2543,14 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     {selectedIndicators.length > 0 ? `${selectedIndicators.join(' and ')} Over Time` : 'Trend Analysis'}
                   </Typography>
                   <FormControl sx={{ minWidth: 350 }}>
-                    <InputLabel id="indicator-select-label" sx={{ fontSize: 13 }}>Select Indicators (Max 2)</InputLabel>
+                    <InputLabel id="indicator-select-label" sx={{ fontSize: 13 }}>Select Indicators (Max 3)</InputLabel>
                     <Select
                       labelId="indicator-select-label"
                       multiple
                       value={selectedIndicators}
                       onChange={handleIndicatorChange}
                       renderValue={(selected) => (selected as string[]).join(', ')}
-                      label="Select Indicators (Max 2)"
+                      label="Select Indicators (Max 3)"
                       size="small"
                       sx={{ 
                         bgcolor: isDark ? 'rgba(255,255,255,0.05)' : 'white',
@@ -2574,7 +2625,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     <MenuItem onClick={() => handleHierarchyClose('year')}>YEARS</MenuItem>
                   </Menu>
                   {indicatorSummary.filter(s => s.value !== null).map((s, idx) => {
-                    const color = idx === 0 ? '#0ba0af' : '#B018D9';
+                    const color = idx === 0 ? '#0ba0af' : idx === 1 ? '#B018D9' : '#FF7A00';
                     const label = s.value !== null
                       ? (s.decimals === 0
                           ? `${Math.round(s.value as number)}${s.suffix}`
@@ -2633,7 +2684,7 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                     )}
                     <Tooltip
                       content={(props: any) => {
-                        const hasBreakdown = selectedIndicators.some(i => i === 'Opened Cases' || i === 'Closed Cases' || i === 'Productivity');
+                        const hasBreakdown = selectedIndicators.some(i => i === 'Opened Cases' || i === 'Closed Cases' || i === 'Calls Efficiency' || i === 'Productivity');
                         if (hasBreakdown) {
                           return (
                             <CasesTooltip
@@ -2678,13 +2729,16 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                       }}
                     />
                     <Legend verticalAlign="bottom" height={36} iconType="circle" iconSize={12} wrapperStyle={{ fontSize: 14, fontWeight: 800, paddingTop: 25 }} />
-                    {selectedIndicators.map((indicator, index) => (
+                    {selectedIndicators.map((indicator, index) => {
+                      const lineColor = index === 0 ? theme.palette.primary.main : index === 1 ? '#B018D9' : '#FF7A00';
+                      const labelPos: any = index === 0 ? 'top' : index === 1 ? 'bottom' : 'top';
+                      return (
                         <Line
                           key={indicator}
                           yAxisId={index === 0 ? 'left' : 'right'}
                           type="monotone"
                           dataKey={indicator}
-                          stroke={index === 0 ? theme.palette.primary.main : "#B018D9"}
+                          stroke={lineColor}
                           strokeWidth={4}
                           dot={{ r: 6, strokeWidth: 3, fill: isDark ? '#000A1A' : '#fff' }}
                           activeDot={{ r: 10, strokeWidth: 0 }}
@@ -2694,12 +2748,12 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                           {trendData.length <= 25 && (
                             <LabelList
                               dataKey={indicator}
-                              position={index === 0 ? "top" : "bottom"}
+                              position={labelPos}
                               offset={15}
                               style={{
                                 fontSize: 13,
                                 fontWeight: 800,
-                                fill: index === 0 ? theme.palette.primary.main : "#B018D9",
+                                fill: lineColor,
                                 opacity: 1
                               }}
                               formatter={(val: any) => {
@@ -2715,7 +2769,8 @@ const AgentView: React.FC<AgentViewProps> = ({ member }) => {
                             />
                           )}
                         </Line>
-                    ))}
+                      );
+                    })}
                   </LineChart>
                 </ResponsiveContainer>
               </Box>
