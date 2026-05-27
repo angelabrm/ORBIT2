@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Product requirements, role definitions, business rules, Pepsico PM spec, and migration status → [PRD.md](PRD.md).
+> Product requirements, role definitions, business rules, Pepsico PM spec, migration status, and endpoint details → [PRD.md](PRD.md).
 
 ## Git workflow
 
@@ -42,23 +42,9 @@ React 19 + Vite frontend, Express 4 backend. Two parallel entry points — keep 
 - `dayjs/plugin/customParseFormat` is not imported; `parseOpenedAt()` uses a regex instead.
 - Follow the same lazy-import pattern for any new heavy package.
 
-### Endpoints
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/health` | DB check |
-| `GET /api/roster` | Google Sheets users, 5-min cache; exposes `compass`, `callPicker`, `qa`, `genesys` join keys |
-| `POST /api/login` | RFC lookup |
-| `GET /api/opened-cases` | `Abiertos` — rows where `datetime_opened` falls in range |
-| `GET /api/closed-cases` | `Cerrados` — join `case_closed_by ↔ Roster.Compass`; date from `closed_date` (`M/D/YYYY` varchar) |
-| `GET /api/incoming-calls` | `Actividad` + `Rendimiento_Agente` merged |
-| `GET /api/qa` | `QA` + `QA_Premium` merged |
-| `GET /api/nsat` | `NSAT` + `NSAT_Premium` merged; ships Q1/Q2/Q3 |
-| `GET /api/still-open-cases` | `Aun_Abiertos` — CAC-wide backlog snapshot |
+**Date columns**: always emit `dateStr: "YYYY-MM-DD"` from the backend alongside `dateMs`. Frontend bucketing always reads `dateStr` — `dayjs(dateMs)` shifts by TZ for users west of UTC.
 
 Roster fetched via public CSV (`gviz/tq?tqx=out:csv`) — no service account. If the sheet goes private, update `fetchRosterFromSheets()` in **both** `server.ts` and `api/index.ts`.
-
-**Date columns**: always emit `dateStr: "YYYY-MM-DD"` from the backend alongside `dateMs`. Frontend bucketing always reads `dateStr` — `dayjs(dateMs)` shifts by TZ offset for users west of UTC.
 
 ### Frontend layout
 
@@ -103,17 +89,7 @@ User data is **never** hardcoded. Read from `useAuth().users` (RFC→User map, p
 
 See **PRD §11** for formulas, join keys, display format, and pending indicators.
 
-Key wiring points in `AgentView.tsx`:
-- `DB_INDICATORS` Set — add an indicator name here to promote it from mock to Neon. `'Productivity'` is NOT in this set (handled as a special case to preserve mock for NA agents).
-- `dbTrendByBucket` — returns `{ out, qaByBucket, nsatByBucket, nsatInfoByBucket, nsatClaimsByBucket, backlogByBucket, fcrByBucket, callsEffByBucket, productivityByBucket }`:
-  - `out` — count/sum/snapshot values (`0` is valid). Includes `Opened Cases`, `Closed Cases`, `Incoming Calls`, `Still Open Cases`, plus six breakdown counts: `Opened Cases Information`, `Opened Cases Complaint`, `Closed Cases Information`, `Closed Cases Complaint` (by `contact_reason_1`), and the raw components `Closed Cases` / `Incoming Calls` (re-read via `_callsEffClosed` / `_callsEffCalls` in tooltip metadata).
-  - `xxxByBucket` — avg/index/ratio values; missing bucket → `null` → gap rendered with `connectNulls={true}`.
-  - `callsEffByBucket` — `(Closed Cases / Incoming Calls) × 100` per bucket; buckets with 0 calls omitted → gap.
-  - `productivityByBucket` — formula varies by `currentUser.subNivel`: Calls = `(CallsEff×0.5)+(QAnorm×0.5)`; Follow up = `(CasesEff×0.5)+(QAnorm×0.5)`; NA → mock data used instead.
+- `DB_INDICATORS` Set — add an indicator name here to promote it from mock to Neon. `'Productivity'` is NOT in this set (handled as a special case).
 - `scopeIsCAC` — gates CAC-only fetches (`Still Open Cases`, `Backlog`).
-- `memberBuckets` / `memberValuesForRanking` — per-member recomputation for the management ranking line and sort order.
 - Team + Member lines share **one Y axis** — do not reintroduce a right axis.
-
-When adding a new indicator, touch: `indicatorOptions`, `CasesTooltip` (if it needs breakdown rows), `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`, and `indicatorSummary` (COUNT_SET / NSAT_SET / PCT_SET classification).
-
-- **`indicatorSummary`** — useMemo that produces per-indicator period totals shown as badges in chart header (upper-right). Up to 3 badges: teal `#0ba0af` (idx 0), purple `#B018D9` (idx 1), orange `#FF7A00` (idx 2). COUNT → sum; NSAT → NPS index; else → average. `null` → badge hidden.
+- When adding a new indicator, touch: `indicatorOptions`, `CasesTooltip`, `memberBuckets`, `memberValuesForRanking`, `teamValueOf` in `aggregatedTrendData`, and `indicatorSummary` (COUNT_SET / NSAT_SET / PCT_SET).
