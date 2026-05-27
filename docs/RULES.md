@@ -89,6 +89,40 @@ Al promover un indicador de mock a Neon, tocar en orden:
 
 ---
 
+## Seguridad
+
+### Token de sesión
+- Login emite cookie `orbit_session` firmada con HMAC-SHA256 (Node `crypto` nativo) → `httpOnly; SameSite=Strict; Max-Age=28800`. En producción también `Secure`.
+- **Nunca** leer ni escribir este cookie desde JavaScript. `credentials: 'include'` en todos los `fetch` para que el browser lo adjunte automáticamente.
+- `JWT_SECRET` debe estar en variables de entorno (Vercel env vars). El valor por defecto `'dev-secret-change-in-production'` solo es aceptable en local dev sin datos reales.
+- Expiración del token: 8 horas. Al expirar, el servidor responde 401 y el AuthContext muestra el login.
+
+### Middleware `requireAuth`
+- Todos los endpoints de datos (`/api/opened-cases`, `/api/closed-cases`, `/api/incoming-calls`, `/api/qa`, `/api/nsat`, `/api/still-open-cases`, `/api/roster`) lo usan.
+- Únicas excepciones: `/api/login`, `/api/logout`, `/api/health`.
+- Al agregar un endpoint nuevo, siempre incluir `requireAuth` como primer middleware.
+
+### Scope validation
+- `getAllowedCompassIds(auth)` → devuelve el Set de Compass IDs que el usuario puede consultar (o `null` para Executive = sin restricción).
+- `assertScope(requestedIds, allowed, res)` → envía 403 y retorna `false` si algún ID está fuera del scope.
+- `resolveUserList(raw, auth)` → si no hay `?user=` y el rol es Agent/PM, auto-inyecta el propio compass (previene full-table scan).
+- Siempre ejecutar `assertScope` antes de hacer la query a la BD.
+
+### Rate limiting
+- `/api/login`: máximo 10 intentos por IP en 15 minutos. En-memory, best-effort para serverless (se reinicia con el proceso).
+- No agregar rate limiting en-memory a endpoints de datos — usar infra (Vercel Edge, Cloudflare) para eso.
+
+### Respuestas de error
+- En producción (`NODE_ENV === 'production'`), usar `errRes(res, status, message)` sin el argumento `detail`.
+- Nunca exponer stack traces, mensajes de error de la BD o nombres de tabla en respuestas de producción.
+- En dev, `errRes(res, 500, 'message', error?.message)` incluye el detail para facilitar debugging.
+
+### Headers de seguridad
+- El middleware de headers corre para **todas** las rutas. No moverlo después del router de Vite.
+- `Content-Security-Policy` incluye `'unsafe-inline'` para scripts/styles por compatibilidad con MUI. Mejorable con nonces en el futuro.
+
+---
+
 ## Indicadores team-wide CAC
 
 `Still Open Cases` y `Backlog` usan `scopeIsCAC` como gate. No fetcharlos si el scope no es CAC. Still Open usa **snapshot** (último día con data), no SUM — aplicar este patrón a cualquier indicador de stock acumulado.

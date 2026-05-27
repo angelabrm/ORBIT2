@@ -31,5 +31,6 @@ npm run clean    # Elimina dist/
 
 Copiar `.env.example` → `.env`:
 - `DATABASE_URL` / `NEON_DB_URL` — Neon PostgreSQL
+- `JWT_SECRET` — Secreto para firmar tokens de sesión (**obligatorio en producción**; generar con `openssl rand -base64 32`)
 - `GEMINI_API_KEY` — Google Gemini
 - `GOOGLE_SHEETS_ID` — Roster (default en código; hoja pública, sin credenciales)

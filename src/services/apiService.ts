@@ -15,10 +15,8 @@ export const fetchOpenedCases = async (compassIds?: string[], startDate?: any, e
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate) params.append('endDate', dayjs(endDate).toISOString());
 
-    const response = await fetch(`/api/opened-cases?${params.toString()}`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch from API');
-    }
+    const response = await fetch(`/api/opened-cases?${params.toString()}`, { credentials: 'include' });
+    if (!response.ok) throw new Error('Failed to fetch from API');
     return await response.json();
   } catch (error) {
     console.error('Error fetching opened cases:', error);
@@ -47,7 +45,7 @@ export const fetchIncomingCalls = async (
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
 
-    const response = await fetch(`/api/incoming-calls?${params.toString()}`);
+    const response = await fetch(`/api/incoming-calls?${params.toString()}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch from API');
     return await response.json();
   } catch (error) {
@@ -70,7 +68,7 @@ export const fetchQA = async (agentes?: string[], startDate?: any, endDate?: any
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
 
-    const response = await fetch(`/api/qa?${params.toString()}`);
+    const response = await fetch(`/api/qa?${params.toString()}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch from API');
     return await response.json();
   } catch (error) {
@@ -96,7 +94,7 @@ export const fetchNSAT = async (compassIds?: string[], startDate?: any, endDate?
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
 
-    const response = await fetch(`/api/nsat?${params.toString()}`);
+    const response = await fetch(`/api/nsat?${params.toString()}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch from API');
     return await response.json();
   } catch (error) {
@@ -116,7 +114,7 @@ export const fetchStillOpenCases = async (startDate?: any, endDate?: any): Promi
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
 
-    const response = await fetch(`/api/still-open-cases?${params.toString()}`);
+    const response = await fetch(`/api/still-open-cases?${params.toString()}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch from API');
     return await response.json();
   } catch (error) {
@@ -144,7 +142,7 @@ export const fetchClosedCases = async (
     if (startDate) params.append('startDate', dayjs(startDate).toISOString());
     if (endDate)   params.append('endDate',   dayjs(endDate).toISOString());
 
-    const response = await fetch(`/api/closed-cases?${params.toString()}`);
+    const response = await fetch(`/api/closed-cases?${params.toString()}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to fetch from API');
     return await response.json();
   } catch (error) {
@@ -155,7 +153,7 @@ export const fetchClosedCases = async (
 
 export const checkApiHealth = async () => {
   try {
-    const response = await fetch('/api/health');
+    const response = await fetch('/api/health', { credentials: 'include' });
     return await response.json();
   } catch (error) {
     return { status: 'error', error: String(error) };
