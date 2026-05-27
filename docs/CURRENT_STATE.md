@@ -78,6 +78,24 @@ No está en `DB_INDICATORS` — caso especial en `trendData` y `aggregatedTrendD
 
 ---
 
+## Seguridad — implementada (2026-05-27)
+
+| Medida | Detalle |
+|--------|---------|
+| **JWT en cookie httpOnly** | Token firmado con HMAC-SHA256 (`crypto` nativo Node). Cookie `orbit_session`: `HttpOnly; SameSite=Strict; Max-Age=28800; Secure` (prod). 8 h de vida. |
+| **`requireAuth` middleware** | Todos los endpoints de datos lo requieren. Verifica firma con `timingSafeEqual` (resiste timing attacks) y expiración. |
+| **Scope validation** | `getAllowedCompassIds` + `assertScope` por endpoint. Agent/PM → solo su compass; Leader → su team (mismo client + serviceDesk); Manager → todo su client; Executive → sin restricción. `resolveUserList` auto-inyecta el compass del agente si no llega `?user=`. |
+| **Rate limiting en login** | 10 intentos / IP / 15 min → HTTP 429. In-memory, best-effort para serverless. |
+| **Security headers** | Todas las respuestas: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `X-XSS-Protection`, `Referrer-Policy`, `Permissions-Policy`, `Content-Security-Policy`. |
+| **`/api/roster` protegido** | Requiere auth + devuelve solo el scope del usuario (Agent no ve datos del equipo). |
+| **Nuevos endpoints** | `POST /api/logout` (limpia cookie), `GET /api/me` (restaura sesión sin re-login). |
+| **Restauración de sesión** | `AuthContext` llama `/api/me` al montar. Si la cookie es válida → usuario logueado sin reintroducir RFC. |
+| **Sin detalles en producción** | `errRes()` omite el `detail` cuando `NODE_ENV === 'production'`. |
+| **`credentials: 'include'`** | Todos los `fetch` en `apiService.ts` envían la cookie automáticamente. |
+| **`JWT_SECRET`** | Variable de entorno requerida en Vercel. Generar con `openssl rand -base64 32`. **Ya configurada en producción.** |
+
+---
+
 ## Optimización de transferencia de red (Neon)
 
 El plan free de Neon tiene 5 GB/mes. Los fetches de tabla completa agotaron el límite. Regla: **siempre filtrar en SQL con `?user=`**.

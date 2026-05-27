@@ -31,10 +31,6 @@ Trabajo pendiente priorizado. Marcar como completado cuando se implemente.
 - Fuente aún por definir — coordinación con equipo Pepsico requerida.
 - Validar fórmulas de Performance, Ranking y QA Rate.
 
-### Control de acceso en endpoints backend
-- Actualmente los endpoints no validan rol/cliente del solicitante.
-- Agregar validación de token/sesión y verificar que el `compassId` solicitado corresponda al usuario autenticado.
-
 ---
 
 ## 🟢 Baja prioridad / mejoras
@@ -52,6 +48,7 @@ Trabajo pendiente priorizado. Marcar como completado cuando se implemente.
 
 ## ✅ Completado recientemente
 
+- **Seguridad completa:** JWT httpOnly cookie, `requireAuth` en todos los endpoints, scope validation por rol, rate limiting, security headers, `/api/roster` protegido y scoped, restauración de sesión, `JWT_SECRET` en Vercel
 - Migración 12 indicadores Stellantis a Neon (ver `docs/CURRENT_STATE.md`)
 - Optimización de transferencia de red: SQL IN filter en opened-cases, fecha SQL en QA
 - Tooltip `CasesTooltip` con desglose por sub-fila

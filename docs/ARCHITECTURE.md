@@ -39,19 +39,37 @@ Las violaciones crashean silenciosamente sin log:
 
 ---
 
+## Sesión y autenticación
+
+**Flujo completo:**
+1. `POST /api/login` → verifica RFC contra Roster → emite cookie `orbit_session` (JWT firmado HMAC-SHA256 con `JWT_SECRET`)
+2. Todos los endpoints de datos → `requireAuth` verifica cookie → adjunta `req.auth` con payload del token
+3. `GET /api/me` → devuelve payload del token (usado por `AuthContext` para restaurar sesión en page refresh)
+4. `POST /api/logout` → cookie `Max-Age=0`
+
+**Token payload:** `{ rfc, name, role, client, serviceDesk, compass, callPicker, qa, genesys, subNivel, iat, exp }`
+
+**Cookie:** `orbit_session=<jwt>; HttpOnly; SameSite=Strict; Max-Age=28800; Path=/; Secure` (Secure solo en prod)
+
+**`JWT_SECRET`:** variable de entorno obligatoria. Generar con `openssl rand -base64 32`. Ya configurada en Vercel.
+
+---
+
 ## Endpoints API
 
-| Endpoint | Tabla(s) fuente | Filtros |
-|----------|----------------|---------|
-| `GET /api/health` | — | — |
-| `GET /api/roster` | Google Sheets CSV | — (caché 5 min) |
-| `POST /api/login` | Google Sheets CSV | `{ rfc }` en body |
-| `GET /api/opened-cases` | `Abiertos` | `?user=id1,id2` → SQL IN; fecha en JS (varchar `M/D/YYYY h:mm A`) |
-| `GET /api/closed-cases` | `Cerrados` | `?user=` SQL IN; fecha en JS (varchar `M/D/YYYY`) |
-| `GET /api/incoming-calls` | `Actividad` + `Rendimiento_Agente` | `?user=` + `?genesys=` SQL IN; fecha en JS |
-| `GET /api/qa` | `QA` + `QA_Premium` | `?user=` SQL IN; `?startDate`/`?endDate` → SQL sobre `Marca temporal::date` |
-| `GET /api/nsat` | `NSAT` + `NSAT_Premium` | `?user=` SQL IN; fecha en JS |
-| `GET /api/still-open-cases` | `Aun_Abiertos` | Filtro fecha SQL (con fallback JS) |
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /api/health` | No | DB check |
+| `POST /api/login` | No | RFC lookup → emite cookie de sesión |
+| `POST /api/logout` | No | Limpia cookie de sesión |
+| `GET /api/me` | ✅ | Devuelve usuario del token actual (restauración de sesión) |
+| `GET /api/roster` | ✅ | Google Sheets users, 5-min cache; **scope por rol** |
+| `GET /api/opened-cases` | ✅ | `Abiertos` — `?user=id1,id2` SQL IN; fecha JS; scope validado |
+| `GET /api/closed-cases` | ✅ | `Cerrados` — `?user=` SQL IN; fecha JS; scope validado |
+| `GET /api/incoming-calls` | ✅ | `Actividad` + `Rendimiento_Agente`; `?user=` + `?genesys=`; scope validado |
+| `GET /api/qa` | ✅ | `QA` + `QA_Premium`; `?user=` SQL IN + fecha SQL (`Marca temporal::date`) |
+| `GET /api/nsat` | ✅ | `NSAT` + `NSAT_Premium`; `?user=` SQL IN; scope validado |
+| `GET /api/still-open-cases` | ✅ | `Aun_Abiertos` — CAC-wide; SQL date filter + fallback JS |
 
 **Nota de transferencia de red:** siempre pasar `?user=` para evitar fetches de tabla completa — el plan free de Neon tiene 5 GB/mes de transferencia. El único endpoint que puede omitir el filtro de usuario intencionalmente es el fetch de Backlog (necesita datos de equipo completo).
 
