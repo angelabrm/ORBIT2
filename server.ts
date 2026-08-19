@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import pg from 'pg';
 import dayjs from 'dayjs';
@@ -219,8 +218,9 @@ async function startServer() {
   const PORT = 3000;
 
   const dbUrl = process.env.DATABASE_URL || process.env.NEON_DB_URL;
+  const useSSL = process.env.DATABASE_SSL !== 'false';
   let pool: pg.Pool | null = null;
-  if (dbUrl) { pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } }); }
+  if (dbUrl) { pool = new Pool({ connectionString: dbUrl, ssl: useSSL ? { rejectUnauthorized: false } : false }); }
 
   app.use(express.json());
 
@@ -395,6 +395,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {

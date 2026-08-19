@@ -1,0 +1,40 @@
+services:
+  orbit-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - orbit-api
+
+  orbit-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://orbit_user:${POSTGRES_PASSWORD}@orbit-postgres:5432/orbit
+      - DATABASE_SSL=false
+      - JWT_SECRET=${JWT_SECRET}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      orbit-postgres:
+        condition: service_healthy
+
+  orbit-postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=orbit
+      - POSTGRES_USER=orbit_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit_user -d orbit"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
